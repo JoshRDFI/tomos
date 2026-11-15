@@ -17,12 +17,14 @@ const chatML: Formatter = (messages) => {
 };
 
 const llama3: Formatter = (messages) => {
-  let prompt = '<|begin_of_text|>';
+  // No explicit <|begin_of_text|>: llama.cpp adds the BOS token itself when
+  // tokenizing, and adding it here too gives the model a double BOS.
+  let prompt = '';
   for (const m of messages) {
     prompt += `<|start_header_id|>${m.role}<|end_header_id|>\n\n${m.content}<|eot_id|>`;
   }
   prompt += '<|start_header_id|>assistant<|end_header_id|>\n\n';
-  return { prompt, stop: ['<|eot_id|>'] };
+  return { prompt, stop: ['<|eot_id|>', '<|end_of_text|>'] };
 };
 
 const gemma: Formatter = (messages) => {

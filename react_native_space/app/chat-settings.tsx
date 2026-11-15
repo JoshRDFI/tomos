@@ -82,13 +82,27 @@ export default function ChatSettingsScreen() {
     })();
   }, [isWeb, sessionId]);
 
+  // Debounced save. Pending fields are merged, so a quick prompt change
+  // followed by a slider move saves both instead of only the last one.
+  const pending = useRef<Partial<SessionRecord>>({});
+
+  const flush = useCallback(() => {
+    if (saveTimer.current) { clearTimeout(saveTimer.current); saveTimer.current = null; }
+    const fields = pending.current;
+    pending.current = {};
+    if (!sessionId || Object.keys(fields).length === 0) return;
+    db.updateSession(sessionId, { ...fields, updatedAt: Date.now() }).catch(() => {});
+  }, [sessionId]);
+
   const autoSave = useCallback((fields: Partial<SessionRecord>) => {
     if (!sessionId) return;
+    pending.current = { ...pending.current, ...fields };
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
-      db.updateSession(sessionId, { ...fields, updatedAt: Date.now() }).catch(() => {});
-    }, 300);
-  }, [sessionId]);
+    saveTimer.current = setTimeout(flush, 300);
+  }, [sessionId, flush]);
+
+  // Save immediately when leaving the screen.
+  useEffect(() => flush, [flush]);
 
   const toggleDefaultPrompt = (val: boolean) => {
     setUseDefaultPrompt(val);

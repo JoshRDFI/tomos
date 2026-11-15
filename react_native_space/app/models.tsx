@@ -51,6 +51,9 @@ export default function ModelsScreen() {
 
   const addModel = useCallback(async () => {
     if (isWeb) return;
+    // Destination of the copy, so a failed import doesn't leave a multi-GB
+    // orphan file behind in app storage.
+    let copiedFile: { exists: boolean; delete: () => void } | null = null;
     try {
       const DocPicker = await import('expo-document-picker');
       const result = await DocPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: false });
@@ -76,9 +79,10 @@ export default function ModelsScreen() {
 
       // Copy file
       const sourceFile = new File(asset.uri);
+      copiedFile = dest;
       await sourceFile.copy(dest);
 
-      const fileSize = asset.size ?? 0;
+      const fileSize = asset.size || dest.size || 0;
 
       // Read metadata
       let displayName = name.replace(/\.gguf$/i, '');
@@ -119,11 +123,13 @@ export default function ModelsScreen() {
         addedAt: Date.now(),
       };
       await db.insertModel(model);
+      copiedFile = null; // owned by the model record now
       setImporting(false);
       setImportMsg('');
       refresh();
       setSnack('Model added');
     } catch (e) {
+      try { if (copiedFile?.exists) copiedFile.delete(); } catch {}
       setImporting(false);
       setImportMsg('');
       setSnack('Import failed: ' + String((e as any)?.message ?? e));

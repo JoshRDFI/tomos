@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import type { GenParams, ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
 import { DEFAULT_GEN_PARAMS } from '@/types';
 import { openDatabaseAsync } from './sqliteLoader';
+import { buildFtsQuery } from './fts';
 
 let _db: any = null;
 
@@ -283,7 +284,8 @@ export async function getSessionMessageCount(sessionId: string): Promise<number>
 export async function searchMessages(query: string): Promise<SearchResult[]> {
   const db = await getDb();
   if (!db) return [];
-  const term = query.replace(/["*]/g, '') + '*';
+  const term = buildFtsQuery(query);
+  if (!term) return [];
   const rows = await db.getAllAsync(
     `SELECT f.messageId, f.sessionId, s.title as sessionTitle, m.content, m.role, m.createdAt,
        snippet(messages_fts, 0, '<<', '>>', '...', 40) as snippet

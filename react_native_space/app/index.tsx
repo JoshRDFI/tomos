@@ -4,7 +4,7 @@ import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Drawer as DrawerLayout } from 'react-native-drawer-layout';
 import { FlashList } from '@shopify/flash-list';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, typeScale } from '@/constants/theme';
 import { useModelContext } from '@/contexts/ModelContext';
@@ -97,6 +97,32 @@ export default function ChatScreen() {
     setModels(m);
   }, [isWeb]);
 
+  // On returning to this screen: pick up session edits (chat settings), a
+  // session chosen from search, and models added/removed on the Models screen.
+  const sessionIdRef = useRef<string | null>(null);
+  sessionIdRef.current = session?.id ?? null;
+  useFocusEffect(
+    useCallback(() => {
+      if (isWeb) return;
+      let cancelled = false;
+      (async () => {
+        const currentId = sessionIdRef.current;
+        if (!currentId) return; // initial load not finished yet
+        const targetId = (await db.getSetting('lastSessionId')) ?? currentId;
+        const target = (await db.getSession(targetId)) ?? (await db.getSession(currentId));
+        if (cancelled || !target) return;
+        setSession(target);
+        if (target.id !== currentId) {
+          const msgs = await db.getSessionMessages(target.id);
+          if (!cancelled) setMessages(msgs);
+          setEditMode(null);
+        }
+        refreshSessions();
+      })().catch((e) => console.warn('Focus refresh error', e));
+      return () => { cancelled = true; };
+    }, [isWeb, refreshSessions]),
+  );
+
   // Drawer back handler
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -134,55 +160,29 @@ export default function ChatScreen() {
     db.setSetting('lastSessionId', s.id).catch(() => {});
   }, [isWeb, modelCtx.loadedModelId]);
 
-  // Send message
-  const sendMessage = useCallback(async (text: string) => {
-    if (isWeb || !session) return;
-    const model = modelCtx.loadedModel;
-    if (!model) return;
+  // Guards against a second send while one is generating (state updates are
+  // async, so isStreaming alone can let a fast double-tap through).
+  const generatingRef = useRef(false);
 
-    // If edit mode, update the message and delete subsequent
-    if (editMode) {
-      const editMsg = messages.find((m) => m.id === editMode.messageId);
-      if (editMsg) {
-        await db.updateMessage(editMsg.id, { content: text });
-        await db.deleteMessagesAfter(session.id, editMsg.createdAt);
-      }
-      setEditMode(null);
-    } else {
-      // Insert user message
-      const userMsg: MessageRecord = {
-        id: db.generateId(),
-        sessionId: session.id,
-        role: 'user',
-        content: text,
-        modelName: model.displayName,
-        tokenCount: null,
-        tokensPerSec: null,
-        stopped: 0,
-        createdAt: Date.now(),
-      };
-      await db.insertMessage(userMsg);
+  // Generate an assistant reply to the session's current messages.
+  const runGeneration = useCallback(async (sessionId: string, model: ModelRecord) => {
+    // Re-read the session so edits made on the chat-settings screen apply.
+    const fresh = await db.getSession(sessionId);
+    if (!fresh) return;
+    setSession(fresh);
 
-      // Auto-title on first user message
-      const count = await db.getSessionMessageCount(session.id);
-      if (count <= 1) {
-        const title = text.slice(0, 40);
-        await db.updateSession(session.id, { title, updatedAt: Date.now() });
-        setSession((s) => s ? { ...s, title, updatedAt: Date.now() } : s);
-      }
-    }
-
-    // Reload messages
-    const currentMsgs = await db.getSessionMessages(session.id);
+    const currentMsgs = await db.getSessionMessages(sessionId);
     setMessages(currentMsgs);
 
     // Ensure model is loaded with right params
-    const params = await db.getEffectiveParams(session);
-    const needReload = modelCtx.loadedModelId !== model.id ||
-      modelCtx.loadedCtxParams?.contextLength !== params.contextLength ||
-      modelCtx.loadedCtxParams?.threads !== params.threads;
+    const params = await db.getEffectiveParams(fresh);
+    const loadedParams = llama.getLoadedCtxParams();
+    const needReload = llama.getLoadedModelId() !== model.id ||
+      loadedParams?.contextLength !== params.contextLength ||
+      loadedParams?.threads !== params.threads;
     if (needReload) {
-      await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+      const ok = await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+      if (!ok) return;
     }
 
     // Generate
@@ -191,15 +191,13 @@ export default function ChatScreen() {
     modelCtx.setGenerating(true);
 
     // Keep awake
-    if (Platform.OS !== 'web') {
-      try {
-        const KA = await import('expo-keep-awake');
-        KA.activateKeepAwakeAsync('gen').catch(() => {});
-      } catch {}
-    }
+    try {
+      const KA = await import('expo-keep-awake');
+      KA.activateKeepAwakeAsync('gen').catch(() => {});
+    } catch {}
 
     try {
-      const systemPrompt = await db.getEffectiveSystemPrompt(session);
+      const systemPrompt = await db.getEffectiveSystemPrompt(fresh);
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
         ...currentMsgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content ?? '' })),
@@ -211,41 +209,85 @@ export default function ChatScreen() {
         setStreamingText(accumulated);
       });
 
-      // Save assistant message
-      const asstMsg: MessageRecord = {
-        id: db.generateId(),
-        sessionId: session.id,
-        role: 'assistant',
-        content: result.content || accumulated,
-        modelName: model.displayName,
-        tokenCount: result.tokenCount,
-        tokensPerSec: result.tokensPerSec,
-        stopped: result.stopped ? 1 : 0,
-        createdAt: Date.now(),
-      };
-      await db.insertMessage(asstMsg);
-      await db.updateSession(session.id, { updatedAt: Date.now() });
+      if (result.droppedMessages > 0) {
+        setSnack(`Conversation is longer than the context window; the oldest ${result.droppedMessages} message${result.droppedMessages === 1 ? ' was' : 's were'} left out.`);
+      }
 
-      const finalMsgs = await db.getSessionMessages(session.id);
+      // Save assistant message (skip if stopped before anything was produced)
+      if (result.content.length > 0 || !result.stopped) {
+        const asstMsg: MessageRecord = {
+          id: db.generateId(),
+          sessionId,
+          role: 'assistant',
+          content: result.content,
+          modelName: model.displayName,
+          tokenCount: result.tokenCount,
+          tokensPerSec: result.tokensPerSec,
+          stopped: result.stopped ? 1 : 0,
+          createdAt: Date.now(),
+        };
+        await db.insertMessage(asstMsg);
+      }
+      await db.updateSession(sessionId, { updatedAt: Date.now() });
+
+      const finalMsgs = await db.getSessionMessages(sessionId);
       setMessages(finalMsgs);
     } catch (e) {
       console.warn('Generation error', e);
       setSnack('Generation failed: ' + String((e as any)?.message ?? e));
-    }
-
-    setIsStreaming(false);
-    setStreamingText('');
-    modelCtx.setGenerating(false);
-
-    if (Platform.OS !== 'web') {
+    } finally {
+      setIsStreaming(false);
+      setStreamingText('');
+      modelCtx.setGenerating(false);
       try {
         const KA = await import('expo-keep-awake');
         KA.deactivateKeepAwake('gen');
       } catch {}
     }
+  }, [modelCtx]);
 
+  // Send message
+  const sendMessage = useCallback(async (text: string) => {
+    if (isWeb || !session || generatingRef.current) return;
+    const model = modelCtx.loadedModel;
+    if (!model) return;
+    generatingRef.current = true;
+    try {
+      if (editMode) {
+        // Update the edited message and drop everything after it
+        const editMsg = messages.find((m) => m.id === editMode.messageId);
+        if (editMsg) {
+          await db.updateMessage(editMsg.id, { content: text });
+          await db.deleteMessagesAfter(session.id, editMsg.createdAt);
+        }
+        setEditMode(null);
+      } else {
+        const userMsg: MessageRecord = {
+          id: db.generateId(),
+          sessionId: session.id,
+          role: 'user',
+          content: text,
+          modelName: model.displayName,
+          tokenCount: null,
+          tokensPerSec: null,
+          stopped: 0,
+          createdAt: Date.now(),
+        };
+        await db.insertMessage(userMsg);
+
+        // Auto-title on first user message
+        const count = await db.getSessionMessageCount(session.id);
+        if (count <= 1) {
+          await db.updateSession(session.id, { title: text.slice(0, 40), updatedAt: Date.now() });
+        }
+      }
+
+      await runGeneration(session.id, model);
+    } finally {
+      generatingRef.current = false;
+    }
     refreshSessions();
-  }, [isWeb, session, modelCtx, editMode, messages, refreshSessions]);
+  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions]);
 
   // Stop
   const handleStop = useCallback(() => {
@@ -265,28 +307,35 @@ export default function ChatScreen() {
     setSnack('Copied');
   }, []);
 
-  // Regenerate
+  // Regenerate: replace the last reply without re-inserting the user message
   const handleRegenerate = useCallback(async () => {
-    if (!session || messages.length === 0) return;
+    if (!session || messages.length === 0 || generatingRef.current) return;
+    const model = modelCtx.loadedModel;
+    if (!model) return;
     const lastMsg = messages[messages.length - 1];
     if (lastMsg?.role !== 'assistant') return;
-    await db.deleteMessage(lastMsg.id);
-    const updated = await db.getSessionMessages(session.id);
-    setMessages(updated);
-    // Re-send from last user message
-    const lastUser = updated[updated.length - 1];
-    if (lastUser?.role === 'user') {
-      sendMessage(lastUser.content);
+    generatingRef.current = true;
+    try {
+      await db.deleteMessage(lastMsg.id);
+      await runGeneration(session.id, model);
+    } finally {
+      generatingRef.current = false;
     }
-  }, [session, messages, sendMessage]);
+    refreshSessions();
+  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
 
   // Model switch
   const handleModelSwitch = useCallback(async (model: ModelRecord) => {
     setModelMenuOpen(false);
     if (!session) return;
+    // Releasing the model mid-generation would kill the reply in progress.
+    if (generatingRef.current) {
+      setSnack('Stop generating before switching models');
+      return;
+    }
     await db.updateSession(session.id, { modelId: model.id, updatedAt: Date.now() });
     setSession((s) => s ? { ...s, modelId: model.id } : s);
-    const params = await db.getEffectiveParams(session);
+    const params = await db.getEffectiveParams(await db.getSession(session.id));
     await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
   }, [session, modelCtx]);
 
@@ -353,27 +402,11 @@ export default function ChatScreen() {
   const modelReady = modelCtx.status === 'ready';
   const hasMessages = (messages?.length ?? 0) > 0;
 
-  const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
-    const isLastAssistant = item.role === 'assistant' && index === 0; // inverted list
-    const streaming = isStreaming && item.role === 'assistant' && index === 0;
-    return (
-      <MessageBubble
-        message={item}
-        isLast={isLastAssistant}
-        isStreaming={streaming}
-        streamingText={streaming ? streamingText : undefined}
-        onCopy={handleCopy}
-        onRegenerate={isLastAssistant ? handleRegenerate : undefined}
-        onLongPress={() => setLongPressMsg(item)}
-      />
-    );
-  }, [isStreaming, streamingText, handleCopy, handleRegenerate]);
-
-  // Build streaming placeholder for inverted list
+  // Chronological order (oldest first); the list starts rendering from the
+  // bottom. While streaming, a placeholder reply is appended at the end.
   const displayMessages = React.useMemo(() => {
-    const base = [...(messages ?? [])].reverse();
+    const base = messages ?? [];
     if (isStreaming) {
-      // Add a temporary streaming message at the top (index 0 of inverted)
       const streamMsg: MessageRecord = {
         id: '__streaming__',
         sessionId: session?.id ?? '',
@@ -385,10 +418,27 @@ export default function ChatScreen() {
         stopped: 0,
         createdAt: Date.now(),
       };
-      return [streamMsg, ...base];
+      return [...base, streamMsg];
     }
     return base;
   }, [messages, isStreaming, session?.id, modelCtx.loadedModel?.displayName]);
+  const displayCount = displayMessages.length;
+
+  const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
+    const streaming = isStreaming && item.id === '__streaming__';
+    const isLastAssistant = item.role === 'assistant' && index === displayCount - 1 && !isStreaming;
+    return (
+      <MessageBubble
+        message={item}
+        isLast={isLastAssistant}
+        isStreaming={streaming}
+        streamingText={streaming ? streamingText : undefined}
+        onCopy={handleCopy}
+        onRegenerate={isLastAssistant ? handleRegenerate : undefined}
+        onLongPress={() => setLongPressMsg(item)}
+      />
+    );
+  }, [isStreaming, streamingText, handleCopy, handleRegenerate, displayCount]);
 
   const chatTopBar = (
     <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top }]}>
@@ -438,7 +488,7 @@ export default function ChatScreen() {
         Loading {modelCtx.loadedModel?.displayName ?? 'model'}… (first load can take 10–30 s)
       </Text>
     </View>
-  ) : modelCtx.status === 'error' ? (
+  ) : modelCtx.error ? (
     <View style={[styles.banner, { backgroundColor: c.accent + '22' }]}>
       <Text style={{ color: c.accent, fontFamily: fontFamilies.inter, fontSize: 13, flex: 1 }}>{modelCtx.error}</Text>
     </View>
@@ -461,7 +511,12 @@ export default function ChatScreen() {
         ) : (
           <View style={{ flex: 1 }}>
             <FlashList
+              key={session?.id ?? 'none'}
               data={displayMessages}
+              maintainVisibleContentPosition={{
+                startRenderingFromBottom: true,
+                autoscrollToBottomThreshold: 0.2,
+              }}
               renderItem={renderMessage}
               keyExtractor={(item) => item.id}
               contentContainerStyle={{ paddingVertical: spacing.xs }}

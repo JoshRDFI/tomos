@@ -1,10 +1,15 @@
 import { Platform } from 'react-native';
 import type { ChatMessage, GenParams, ModelRecord } from '@/types';
 import { formatPrompt } from './templates';
+import { fitToContext } from './contextWindow';
 
 let _context: any = null;
 let _loadedModelId: string | null = null;
 let _loadedCtxParams: { contextLength: number; threads: number } | null = null;
+
+// The completion currently running on _context, if any. Releasing the native
+// context while a completion is in flight crashes, so release waits on this.
+let _inflight: Promise<unknown> | null = null;
 
 export const isNative = Platform.OS !== 'web';
 
@@ -27,6 +32,10 @@ export async function loadModel(
 
 export async function releaseModel(): Promise<void> {
   if (_context) {
+    if (_inflight) {
+      try { await _context.stopCompletion(); } catch {}
+      try { await _inflight; } catch {}
+    }
     try { await _context.release(); } catch {}
     _context = null;
   }
@@ -56,6 +65,11 @@ let _stopRef: { stop: boolean } = { stop: false };
 
 export function stopGeneration() {
   _stopRef.stop = true;
+  // Actually interrupt native generation; the completion promise then resolves
+  // promptly with what was produced so far.
+  if (_context && _inflight) {
+    _context.stopCompletion().catch(() => {});
+  }
 }
 
 export interface GenerateResult {
@@ -63,6 +77,18 @@ export interface GenerateResult {
   tokenCount: number;
   tokensPerSec: number;
   stopped: boolean;
+  /** Number of oldest history messages left out to fit the context window. */
+  droppedMessages: number;
+}
+
+async function countTokens(text: string): Promise<number> {
+  try {
+    const res = await _context.tokenize(text);
+    return res?.tokens?.length ?? Math.ceil(text.length / 3);
+  } catch {
+    // Conservative fallback (~3 chars per token)
+    return Math.ceil(text.length / 3);
+  }
 }
 
 export async function generate(
@@ -74,67 +100,70 @@ export async function generate(
   if (!isNative || !_context) {
     throw new Error('Model not loaded');
   }
+  if (_inflight) {
+    throw new Error('A response is already being generated');
+  }
 
   _stopRef = { stop: false };
   const stopRef = _stopRef;
+  const ctx = _context;
+
+  const nCtx = _loadedCtxParams?.contextLength ?? params.contextLength;
+  // Never ask for more output than leaves room for at least some prompt.
+  const nPredict = Math.max(16, Math.min(params.maxTokens, Math.floor(nCtx / 2)));
+  const { messages: fitted, dropped } = await fitToContext(messages, nCtx, nPredict, countTokens);
 
   const templateKey = model.templateOverride ?? 'auto';
   const useJinja = templateKey === 'auto' && model.detectedTemplate === 'auto-available';
 
-  let result: any;
+  const sampling = {
+    temperature: params.temperature,
+    top_p: params.topP,
+    top_k: params.topK,
+    min_p: params.minP,
+    penalty_repeat: params.repeatPenalty,
+    n_predict: nPredict,
+  };
 
+  let shown = '';
+  const onData = (data: any) => {
+    if (stopRef.stop) return;
+    const tok = data?.token ?? '';
+    if (tok) {
+      shown += tok;
+      onToken(tok);
+    }
+  };
+
+  let request: any;
   if (useJinja) {
-    // Use llama.rn's built-in template with jinja
-    const llamaMessages = messages.map((m) => ({ role: m.role, content: m.content }));
-    result = await _context.completion(
-      {
-        messages: llamaMessages,
-        jinja: true,
-        temperature: params.temperature,
-        top_p: params.topP,
-        top_k: params.topK,
-        min_p: params.minP,
-        penalty_repeat: params.repeatPenalty,
-        n_predict: params.maxTokens,
-      },
-      (data: any) => {
-        if (stopRef.stop) return;
-        const tok = data?.token ?? '';
-        if (tok) onToken(tok);
-      },
-    );
+    request = {
+      ...sampling,
+      messages: fitted.map((m) => ({ role: m.role, content: m.content })),
+      jinja: true,
+    };
   } else {
-    // Manual template
     const effectiveKey = templateKey === 'auto' ? 'chatml' : templateKey;
-    const { prompt, stop } = formatPrompt(effectiveKey, messages);
-
-    result = await _context.completion(
-      {
-        prompt,
-        stop,
-        temperature: params.temperature,
-        top_p: params.topP,
-        top_k: params.topK,
-        min_p: params.minP,
-        penalty_repeat: params.repeatPenalty,
-        n_predict: params.maxTokens,
-      },
-      (data: any) => {
-        if (stopRef.stop) return;
-        const tok = data?.token ?? '';
-        if (tok) onToken(tok);
-      },
-    );
+    const { prompt, stop } = formatPrompt(effectiveKey, fitted);
+    request = { ...sampling, prompt, stop };
   }
 
-  if (stopRef.stop) {
-    try { await _context.stopCompletion(); } catch {}
+  const run = ctx.completion(request, onData);
+  _inflight = run;
+  let result: any;
+  try {
+    result = await run;
+  } finally {
+    _inflight = null;
   }
 
   return {
-    content: result?.text ?? '',
+    // When stopped, keep exactly what the user saw rather than the full native
+    // result, which can include tokens produced after the stop request.
+    content: stopRef.stop ? shown : (result?.text ?? shown),
     tokenCount: result?.timings?.predicted_n ?? 0,
     tokensPerSec: result?.timings?.predicted_per_second ?? 0,
     stopped: stopRef.stop,
+    droppedMessages: dropped,
   };
 }

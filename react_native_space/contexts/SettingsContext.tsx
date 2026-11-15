@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 import type { ThemeMode, GenParams } from '@/types';
 import { DEFAULT_GEN_PARAMS } from '@/types';
@@ -65,9 +65,16 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     db.setSetting('defaultSystemPrompt', s).catch(() => {});
   }, []);
 
+  // Sliders call this on every tick; update state immediately but batch the
+  // database write.
+  const paramsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const setDefaultParams = useCallback((p: GenParams) => {
     _setDefaultParams(p);
-    db.setSetting('defaultParams', JSON.stringify(p)).catch(() => {});
+    if (paramsSaveTimer.current) clearTimeout(paramsSaveTimer.current);
+    paramsSaveTimer.current = setTimeout(() => {
+      paramsSaveTimer.current = null;
+      db.setSetting('defaultParams', JSON.stringify(p)).catch(() => {});
+    }, 300);
   }, []);
 
   return (

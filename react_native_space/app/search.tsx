@@ -48,12 +48,11 @@ export default function SearchScreen() {
     timerRef.current = setTimeout(() => doSearch(text), 250);
   }, [doSearch]);
 
-  const handleSelect = useCallback((r: SearchResult) => {
-    // Navigate back to chat with this session
+  const handleSelect = useCallback(async (r: SearchResult) => {
+    // The chat screen re-reads lastSessionId when it regains focus and
+    // switches to it, so save it before navigating back.
+    try { await db.setSetting('lastSessionId', r.sessionId); } catch {}
     router.back();
-    // The chat screen will need to switch to this session
-    // For now we store the target in a setting
-    db.setSetting('lastSessionId', r.sessionId).catch(() => {});
   }, [router]);
 
   const renderSnippet = (snippet: string) => {
