@@ -92,6 +92,8 @@ export default function RootLayout() {
               <Stack.Screen name="models" options={{ title: 'Models' }} />
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/presets" options={{ title: 'System Prompt Presets' }} />
+              <Stack.Screen name="settings/model" options={{ title: 'Model settings' }} />
+              <Stack.Screen name="settings/about" options={{ title: 'About' }} />
               <Stack.Screen name="help" options={{ title: 'Help' }} />
               <Stack.Screen name="+not-found" options={{ title: 'Not Found' }} />
             </Stack>

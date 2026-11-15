@@ -32,6 +32,11 @@ const sections = [
     body: `"Auto" reads the template embedded in the GGUF file. Most modern models include one.\n\nIf replies look garbled, cut off, or never stop generating, try setting the matching template manually in the Model Manager (… menu → Chat template).\n\nCommon templates: ChatML (default fallback), Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca.`,
   },
   {
+    title: 'Model settings (llama.cpp)',
+    icon: 'tune-variant',
+    body: `Settings are layered; each level overrides the ones before it:\n\n1. App defaults\n2. Settings → Model settings for all chats\n3. Recommendations stored in the model file (read automatically)\n4. Settings → Settings per model (or Models → … → Settings)\n5. A chat's own settings (⚙ in the chat)\n\nUse "Add setting" to pick any llama.cpp option, or "Custom…" to type any llama.rn parameter name and value. "Paste flags" accepts a command from a model card, e.g. --temp 1.0 --top-p 0.95 --presence-penalty 1.0.\n\nSettings marked "reloads model" (context length, threads, GPU layers…) apply the next time the model loads; the app reloads it automatically before the next reply.`,
+  },
+  {
     title: 'Performance tips',
     icon: 'speedometer',
     body: `• 4–6 threads is usually fastest on modern phones.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,

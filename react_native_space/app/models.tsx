@@ -8,6 +8,8 @@ import { useModelContext } from '@/contexts/ModelContext';
 import * as db from '@/lib/db';
 import { parseQuantFromFilename, formatBytes, memoryHint } from '@/lib/gguf';
 import * as llama from '@/lib/llama';
+import { prepareModel } from '@/lib/modelMeta';
+import { extractFileParams } from '@/lib/params';
 import type { ModelRecord, TemplateKey } from '@/types';
 import { TEMPLATE_OPTIONS } from '@/types';
 import WebNotice from '@/components/WebNotice';
@@ -90,6 +92,7 @@ export default function ModelsScreen() {
       let parameterLabel: string | null = null;
       let detectedTemplate: string | null = null;
       let trainedContext: number | null = null;
+      let fileParams: string | null = null;
 
       try {
         const info = await llama.loadModelInfo(dest.uri);
@@ -99,7 +102,9 @@ export default function ModelsScreen() {
           parameterLabel = (info as any)?.['general.size_label'] ?? null;
           if ((info as any)?.['tokenizer.chat_template']) detectedTemplate = 'auto-available';
           const arch = architecture?.toLowerCase?.() ?? '';
-          trainedContext = (info as any)?.[`${arch}.context_length`] ?? null;
+          const ctxLen = Number((info as any)?.[`${arch}.context_length`]);
+          trainedContext = Number.isFinite(ctxLen) && ctxLen > 0 ? ctxLen : null;
+          fileParams = JSON.stringify(extractFileParams(info as Record<string, unknown>));
         }
       } catch (e) {
         console.warn('Metadata read failed', e);
@@ -121,6 +126,8 @@ export default function ModelsScreen() {
         templateOverride: 'auto',
         trainedContext,
         addedAt: Date.now(),
+        fileParams,
+        paramsOverride: null,
       };
       await db.insertModel(model);
       copiedFile = null; // owned by the model record now
@@ -142,8 +149,9 @@ export default function ModelsScreen() {
       return;
     }
     setLoadingModelId(model.id);
-    const params = await db.getDefaultParams();
-    await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+    // No chat context here: use all-chats, model-file and this-model settings.
+    const prepared = await prepareModel(model, null);
+    await modelCtx.loadModel(prepared.model, prepared.load);
     setLoadingModelId(null);
   }, [modelCtx]);
 
@@ -256,6 +264,7 @@ export default function ModelsScreen() {
                     onDismiss={() => setMenuModel(null)}
                     anchor={<IconButton icon="dots-vertical" size={20} iconColor={c.textSecondary} onPress={() => setMenuModel(model.id)} />}
                   >
+                    <Menu.Item title="Settings…" onPress={() => { setMenuModel(null); router.push({ pathname: '/settings/model', params: { modelId: model.id } }); }} leadingIcon="tune-variant" />
                     <Menu.Item title="Chat template…" onPress={() => { setMenuModel(null); setTemplateChoice(model.templateOverride as TemplateKey); setTemplateDialog(model); }} leadingIcon="code-tags" />
                     <Menu.Item title="Rename" onPress={() => { setMenuModel(null); setRenameText(model.displayName); setRenameDialog(model); }} leadingIcon="pencil-outline" />
                     <Menu.Item title="Remove" onPress={() => { setMenuModel(null); setDeleteDialog(model); }} leadingIcon="delete-outline" titleStyle={{ color: c.error }} />

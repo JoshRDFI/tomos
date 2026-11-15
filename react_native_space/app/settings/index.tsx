@@ -1,40 +1,14 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, ScrollView, Platform } from 'react-native';
-import { Text, SegmentedButtons, useTheme, Button, Menu, TextInput as PaperInput } from 'react-native-paper';
-import { useRouter, Stack } from 'expo-router';
-import Slider from '@react-native-community/slider';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, StyleSheet, ScrollView, Platform, Pressable } from 'react-native';
+import { Text, SegmentedButtons, useTheme, Button, Menu, TextInput as PaperInput, Icon } from 'react-native-paper';
+import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
-import { spacing, fontFamilies } from '@/constants/theme';
+import { spacing, fontFamilies, radii } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
-import type { GenParams, ThemeMode, PromptPreset } from '@/types';
-import { DEFAULT_GEN_PARAMS, PARAM_RANGES, PARAM_LABELS } from '@/types';
+import type { ModelRecord, ThemeMode, PromptPreset } from '@/types';
 import * as db from '@/lib/db';
-
-function ParamSlider({ label, value, range, onChange }: { label: string; value: number; range: { min: number; max: number; step: number }; onChange: (v: number) => void }) {
-  const theme = useTheme<AppTheme>();
-  const c = theme.appColors;
-  return (
-    <View style={{ marginBottom: 12 }}>
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
-        <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14 }}>{label}</Text>
-        <Text style={{ color: c.text, fontFamily: fontFamilies.mono, fontSize: 13 }}>
-          {range.step < 1 ? value.toFixed(2) : String(value)}
-        </Text>
-      </View>
-      <Slider
-        value={value}
-        minimumValue={range.min}
-        maximumValue={range.max}
-        step={range.step}
-        onValueChange={onChange}
-        minimumTrackTintColor={c.brand}
-        maximumTrackTintColor={c.hairline}
-        thumbTintColor={c.brand}
-        style={{ height: 40 }}
-      />
-    </View>
-  );
-}
+import ParamEditor from '@/components/params/ParamEditor';
+import { parseParamSet, resolveParams, type ParamSet } from '@/lib/params';
 
 export default function SettingsScreen() {
   const theme = useTheme<AppTheme>();
@@ -46,31 +20,54 @@ export default function SettingsScreen() {
   const [presets, setPresets] = useState<PromptPreset[]>([]);
   const [presetMenu, setPresetMenu] = useState(false);
   const [promptText, setPromptText] = useState(settings.defaultSystemPrompt);
+  const [globalParams, setGlobalParams] = useState<ParamSet>({});
+  const [models, setModels] = useState<ModelRecord[]>([]);
 
-  React.useEffect(() => {
+  useFocusEffect(
+    useCallback(() => {
+      if (isWeb) return;
+      db.getAllPresets().then(setPresets).catch(() => {});
+      db.getAllModels().then(setModels).catch(() => {});
+    }, [isWeb]),
+  );
+
+  useEffect(() => {
     if (isWeb) return;
-    db.getAllPresets().then(setPresets).catch(() => {});
+    db.getGlobalParams().then(setGlobalParams).catch(() => {});
   }, [isWeb]);
 
-  React.useEffect(() => {
+  useEffect(() => {
     setPromptText(settings.defaultSystemPrompt);
   }, [settings.defaultSystemPrompt]);
 
-  const updateParam = (key: keyof GenParams, value: number) => {
-    settings.setDefaultParams({ ...settings.defaultParams, [key]: value });
-  };
-
-  const resetParams = () => {
-    settings.setDefaultParams({ ...DEFAULT_GEN_PARAMS });
+  // Debounced save of the all-chats settings, flushed when leaving.
+  const pending = useRef<ParamSet | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    if (pending.current) {
+      db.setGlobalParams(pending.current).catch(() => {});
+      pending.current = null;
+    }
+  }, []);
+  useEffect(() => flush, [flush]);
+  const updateGlobal = (next: ParamSet) => {
+    setGlobalParams(next);
+    pending.current = next;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 300);
   };
 
   return (
     <>
       <Stack.Screen options={{ title: 'Settings', headerStyle: { backgroundColor: c.surface }, headerTintColor: c.text }} />
-      <ScrollView style={{ flex: 1, backgroundColor: c.background }} contentContainerStyle={{ padding: spacing.md, gap: spacing.md, paddingBottom: 40 }}>
-
+      <ScrollView
+        style={{ flex: 1, backgroundColor: c.background }}
+        contentContainerStyle={{ padding: spacing.md, gap: spacing.md, paddingBottom: 40 }}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* Appearance */}
-        <Text style={[styles.section, { color: c.text, fontFamily: fontFamilies.interSemiBold }]}>Appearance</Text>
+        <Text style={[styles.section, { color: c.text }]}>Appearance</Text>
         <SegmentedButtons
           value={settings.themeMode}
           onValueChange={(v) => settings.setThemeMode(v as ThemeMode)}
@@ -82,7 +79,8 @@ export default function SettingsScreen() {
         />
 
         {/* Default system prompt */}
-        <Text style={[styles.section, { color: c.text, fontFamily: fontFamilies.interSemiBold, marginTop: spacing.md }]}>Default system prompt</Text>
+        <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>System prompt</Text>
+        <Text style={[styles.note, { color: c.textSecondary }]}>Used by every chat unless the chat sets its own.</Text>
         <PaperInput
           value={promptText}
           onChangeText={(t) => { setPromptText(t); settings.setDefaultSystemPrompt(t); }}
@@ -105,28 +103,59 @@ export default function SettingsScreen() {
           <Button mode="outlined" onPress={() => router.push('/settings/presets')} compact>Manage presets</Button>
         </View>
 
-        {/* Default parameters */}
-        <Text style={[styles.section, { color: c.text, fontFamily: fontFamilies.interSemiBold, marginTop: spacing.md }]}>Default generation parameters</Text>
-        {(Object.keys(PARAM_RANGES) as (keyof GenParams)[]).map((key) => (
-          <ParamSlider
-            key={key}
-            label={PARAM_LABELS[key]}
-            value={settings.defaultParams[key]}
-            range={PARAM_RANGES[key]}
-            onChange={(v) => updateParam(key, v)}
-          />
-        ))}
-        <Button mode="text" onPress={resetParams} textColor={c.brand}>Reset to defaults</Button>
+        {/* llama.cpp settings for all chats */}
+        <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>Model settings for all chats</Text>
+        <Text style={[styles.note, { color: c.textSecondary }]}>
+          llama.cpp settings used everywhere. A model's own settings (below) and a chat's settings take priority.
+        </Text>
+        <ParamEditor overrides={globalParams} inherited={resolveParams({})} onChange={updateGlobal} />
+
+        {/* Per-model */}
+        <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>Settings per model</Text>
+        <Text style={[styles.note, { color: c.textSecondary }]}>
+          Recommended settings in a model file are applied automatically; tap a model to see or change them.
+        </Text>
+        {models.length === 0 && (
+          <Button mode="outlined" icon="chip" onPress={() => router.push('/models')} style={{ alignSelf: 'flex-start' }}>Add a model</Button>
+        )}
+        {models.map((m) => {
+          const own = Object.keys(parseParamSet(m.paramsOverride)).length;
+          const file = Object.keys(parseParamSet(m.fileParams)).length;
+          const summary = [
+            file ? `${file} from model file` : null,
+            own ? `${own} customized` : null,
+          ].filter(Boolean).join(' · ') || 'Using settings for all chats';
+          return (
+            <Pressable
+              key={m.id}
+              onPress={() => router.push({ pathname: '/settings/model', params: { modelId: m.id } })}
+              style={[styles.navRow, { backgroundColor: c.surface, borderColor: c.hairline }]}
+            >
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: c.text, fontFamily: fontFamilies.interMedium, fontSize: 15 }}>{m.displayName}</Text>
+                <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12 }}>{summary}</Text>
+              </View>
+              <Icon source="chevron-right" size={20} color={c.textSecondary} />
+            </Pressable>
+          );
+        })}
 
         {/* About */}
-        <Text style={[styles.section, { color: c.text, fontFamily: fontFamilies.interSemiBold, marginTop: spacing.md }]}>About</Text>
-        <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 14 }}>Local Chat v1.0.0</Text>
-        <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>All data stays on this device.</Text>
+        <Pressable
+          onPress={() => router.push('/settings/about')}
+          style={[styles.navRow, { backgroundColor: c.surface, borderColor: c.hairline, marginTop: spacing.md }]}
+        >
+          <Icon source="information-outline" size={20} color={c.textSecondary} />
+          <Text style={{ color: c.text, fontFamily: fontFamilies.interMedium, fontSize: 15, flex: 1 }}>About & licenses</Text>
+          <Icon source="chevron-right" size={20} color={c.textSecondary} />
+        </Pressable>
       </ScrollView>
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  section: { fontSize: 16, lineHeight: 22 },
+  section: { fontSize: 16, lineHeight: 22, fontFamily: fontFamilies.interSemiBold },
+  note: { fontSize: 13, lineHeight: 18, fontFamily: fontFamilies.inter, marginTop: -8 },
+  navRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: radii.card, borderWidth: StyleSheet.hairlineWidth },
 });

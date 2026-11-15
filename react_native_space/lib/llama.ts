@@ -1,11 +1,12 @@
 import { Platform } from 'react-native';
-import type { ChatMessage, GenParams, ModelRecord } from '@/types';
+import type { ChatMessage, ModelRecord } from '@/types';
+import { loadSignature, type ParamSet } from './params';
 import { formatPrompt } from './templates';
 import { fitToContext } from './contextWindow';
 
 let _context: any = null;
 let _loadedModelId: string | null = null;
-let _loadedCtxParams: { contextLength: number; threads: number } | null = null;
+let _loadedParams: ParamSet | null = null;
 
 // The completion currently running on _context, if any. Releasing the native
 // context while a completion is in flight crashes, so release waits on this.
@@ -13,21 +14,18 @@ let _inflight: Promise<unknown> | null = null;
 
 export const isNative = Platform.OS !== 'web';
 
-export async function loadModel(
-  model: ModelRecord,
-  params: { contextLength: number; threads: number },
-): Promise<void> {
+/** Load `model` with the given load-time llama.rn parameters (n_ctx, n_threads, ...). */
+export async function loadModel(model: ModelRecord, loadParams: ParamSet): Promise<void> {
   if (!isNative) return;
   await releaseModel();
   const { initLlama } = await import('llama.rn');
   _context = await initLlama({
-    model: model.filePath,
-    n_ctx: params.contextLength,
-    n_threads: params.threads,
     use_mlock: false,
-  });
+    ...(loadParams as object),
+    model: model.filePath,
+  } as any);
   _loadedModelId = model.id;
-  _loadedCtxParams = { ...params };
+  _loadedParams = { ...loadParams };
 }
 
 export async function releaseModel(): Promise<void> {
@@ -40,15 +38,16 @@ export async function releaseModel(): Promise<void> {
     _context = null;
   }
   _loadedModelId = null;
-  _loadedCtxParams = null;
+  _loadedParams = null;
 }
 
 export function getLoadedModelId(): string | null {
   return _loadedModelId;
 }
 
-export function getLoadedCtxParams() {
-  return _loadedCtxParams;
+/** Identity of the load parameters currently in effect, or null if nothing is loaded. */
+export function getLoadedSignature(): string | null {
+  return _loadedParams ? loadSignature(_loadedParams) : null;
 }
 
 export async function loadModelInfo(filePath: string): Promise<Record<string, any> | null> {
@@ -94,7 +93,8 @@ async function countTokens(text: string): Promise<number> {
 export async function generate(
   model: ModelRecord,
   messages: ChatMessage[],
-  params: GenParams,
+  /** Per-completion llama.rn parameters (temperature, top_k, n_predict, ...). */
+  params: ParamSet,
   onToken: (token: string) => void,
 ): Promise<GenerateResult> {
   if (!isNative || !_context) {
@@ -108,22 +108,20 @@ export async function generate(
   const stopRef = _stopRef;
   const ctx = _context;
 
-  const nCtx = _loadedCtxParams?.contextLength ?? params.contextLength;
+  const nCtx = Number(_loadedParams?.n_ctx) || 512;
   // Never ask for more output than leaves room for at least some prompt.
-  const nPredict = Math.max(16, Math.min(params.maxTokens, Math.floor(nCtx / 2)));
+  // n_predict <= 0 means "no limit" in llama.cpp; cap it the same way.
+  const requested = Number(params.n_predict);
+  const half = Math.floor(nCtx / 2);
+  const nPredict = Math.max(16, requested > 0 ? Math.min(requested, half) : half);
   const { messages: fitted, dropped } = await fitToContext(messages, nCtx, nPredict, countTokens);
 
   const templateKey = model.templateOverride ?? 'auto';
-  const useJinja = templateKey === 'auto' && model.detectedTemplate === 'auto-available';
+  const hasJinjaTemplate = model.detectedTemplate === 'auto-available' || !!_loadedParams?.chat_template;
+  const useJinja = templateKey === 'auto' && hasJinjaTemplate;
 
-  const sampling = {
-    temperature: params.temperature,
-    top_p: params.topP,
-    top_k: params.topK,
-    min_p: params.minP,
-    penalty_repeat: params.repeatPenalty,
-    n_predict: nPredict,
-  };
+  // Everything the user configured passes straight through to llama.rn.
+  const sampling = { ...params, n_predict: nPredict };
 
   let shown = '';
   const onData = (data: any) => {
@@ -145,7 +143,8 @@ export async function generate(
   } else {
     const effectiveKey = templateKey === 'auto' ? 'chatml' : templateKey;
     const { prompt, stop } = formatPrompt(effectiveKey, fitted);
-    request = { ...sampling, prompt, stop };
+    const userStop = Array.isArray(params.stop) ? (params.stop as unknown[]).filter((x) => typeof x === 'string') as string[] : [];
+    request = { ...sampling, prompt, stop: [...stop, ...userStop] };
   }
 
   const run = ctx.completion(request, onData);

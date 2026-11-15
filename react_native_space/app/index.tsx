@@ -11,7 +11,9 @@ import { useModelContext } from '@/contexts/ModelContext';
 import { useSettings } from '@/contexts/SettingsContext';
 import * as db from '@/lib/db';
 import * as llama from '@/lib/llama';
-import type { SessionRecord, MessageRecord, ModelRecord, GenParams } from '@/types';
+import { prepareModel } from '@/lib/modelMeta';
+import { loadSignature } from '@/lib/params';
+import type { SessionRecord, MessageRecord, ModelRecord } from '@/types';
 import MessageBubble from '@/components/chat/MessageBubble';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
@@ -77,8 +79,8 @@ export default function ChatScreen() {
           if (lastModelId) {
             const model = await db.getModel(lastModelId);
             if (model) {
-              const params = s ? await db.getEffectiveParams(s) : settings.defaultParams;
-              modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+              const prepared = await prepareModel(model, s);
+              modelCtx.loadModel(prepared.model, prepared.load);
             }
           }
         }
@@ -165,7 +167,7 @@ export default function ChatScreen() {
   const generatingRef = useRef(false);
 
   // Generate an assistant reply to the session's current messages.
-  const runGeneration = useCallback(async (sessionId: string, model: ModelRecord) => {
+  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord) => {
     // Re-read the session so edits made on the chat-settings screen apply.
     const fresh = await db.getSession(sessionId);
     if (!fresh) return;
@@ -174,14 +176,13 @@ export default function ChatScreen() {
     const currentMsgs = await db.getSessionMessages(sessionId);
     setMessages(currentMsgs);
 
-    // Ensure model is loaded with right params
-    const params = await db.getEffectiveParams(fresh);
-    const loadedParams = llama.getLoadedCtxParams();
+    // Effective settings (all chats < model file < this model < this chat);
+    // reload if any load-time setting changed.
+    const { model, load, completion } = await prepareModel(loadedModel, fresh);
     const needReload = llama.getLoadedModelId() !== model.id ||
-      loadedParams?.contextLength !== params.contextLength ||
-      loadedParams?.threads !== params.threads;
+      llama.getLoadedSignature() !== loadSignature(load);
     if (needReload) {
-      const ok = await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+      const ok = await modelCtx.loadModel(model, load);
       if (!ok) return;
     }
 
@@ -204,7 +205,7 @@ export default function ChatScreen() {
       ];
 
       let accumulated = '';
-      const result = await llama.generate(model, chatMessages, params, (token) => {
+      const result = await llama.generate(model, chatMessages, completion, (token) => {
         accumulated += token;
         setStreamingText(accumulated);
       });
@@ -335,8 +336,8 @@ export default function ChatScreen() {
     }
     await db.updateSession(session.id, { modelId: model.id, updatedAt: Date.now() });
     setSession((s) => s ? { ...s, modelId: model.id } : s);
-    const params = await db.getEffectiveParams(await db.getSession(session.id));
-    await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+    const prepared = await prepareModel(model, await db.getSession(session.id));
+    await modelCtx.loadModel(prepared.model, prepared.load);
   }, [session, modelCtx]);
 
   // Rename

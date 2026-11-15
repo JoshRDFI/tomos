@@ -1,20 +1,17 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
 import { Platform } from 'react-native';
-import type { ThemeMode, GenParams } from '@/types';
-import { DEFAULT_GEN_PARAMS } from '@/types';
+import type { ThemeMode } from '@/types';
 import * as db from '@/lib/db';
 
 interface SettingsState {
   themeMode: ThemeMode;
   defaultSystemPrompt: string;
-  defaultParams: GenParams;
   ready: boolean;
 }
 
 interface SettingsActions {
   setThemeMode: (m: ThemeMode) => void;
   setDefaultSystemPrompt: (s: string) => void;
-  setDefaultParams: (p: GenParams) => void;
 }
 
 type SettingsCtx = SettingsState & SettingsActions;
@@ -22,17 +19,14 @@ type SettingsCtx = SettingsState & SettingsActions;
 const Ctx = createContext<SettingsCtx>({
   themeMode: 'dark',
   defaultSystemPrompt: 'You are a helpful, concise assistant.',
-  defaultParams: { ...DEFAULT_GEN_PARAMS },
   ready: false,
   setThemeMode: () => {},
   setDefaultSystemPrompt: () => {},
-  setDefaultParams: () => {},
 });
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [themeMode, _setThemeMode] = useState<ThemeMode>('dark');
   const [defaultSystemPrompt, _setDefaultSystemPrompt] = useState('You are a helpful, concise assistant.');
-  const [defaultParams, _setDefaultParams] = useState<GenParams>({ ...DEFAULT_GEN_PARAMS });
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -44,10 +38,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         if (tm === 'light' || tm === 'system') _setThemeMode(tm);
         const sp = await db.getSetting('defaultSystemPrompt');
         if (sp != null) _setDefaultSystemPrompt(sp);
-        const dp = await db.getSetting('defaultParams');
-        if (dp) {
-          try { _setDefaultParams({ ...DEFAULT_GEN_PARAMS, ...JSON.parse(dp) }); } catch {}
-        }
       } catch (e) {
         console.warn('Settings init error', e);
       }
@@ -65,20 +55,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     db.setSetting('defaultSystemPrompt', s).catch(() => {});
   }, []);
 
-  // Sliders call this on every tick; update state immediately but batch the
-  // database write.
-  const paramsSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const setDefaultParams = useCallback((p: GenParams) => {
-    _setDefaultParams(p);
-    if (paramsSaveTimer.current) clearTimeout(paramsSaveTimer.current);
-    paramsSaveTimer.current = setTimeout(() => {
-      paramsSaveTimer.current = null;
-      db.setSetting('defaultParams', JSON.stringify(p)).catch(() => {});
-    }, 300);
-  }, []);
 
   return (
-    <Ctx.Provider value={{ themeMode, defaultSystemPrompt, defaultParams, ready, setThemeMode, setDefaultSystemPrompt, setDefaultParams }}>
+    <Ctx.Provider value={{ themeMode, defaultSystemPrompt, ready, setThemeMode, setDefaultSystemPrompt }}>
       {children}
     </Ctx.Provider>
   );

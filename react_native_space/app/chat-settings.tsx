@@ -2,44 +2,14 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Text, Switch, useTheme, Button, Menu, TextInput as PaperInput, Dialog, Portal, Snackbar } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
-import Slider from '@react-native-community/slider';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
 import * as db from '@/lib/db';
-import type { SessionRecord, GenParams, PromptPreset } from '@/types';
-import { DEFAULT_GEN_PARAMS, PARAM_RANGES, PARAM_LABELS } from '@/types';
-
-function ParamSlider({ label, value, range, onChange, mono }: { label: string; value: number; range: { min: number; max: number; step: number }; onChange: (v: number) => void; mono: boolean }) {
-  const theme = useTheme<AppTheme>();
-  const c = theme.appColors;
-  return (
-    <View style={paramStyles.row}>
-      <View style={paramStyles.labelRow}>
-        <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14 }}>{label}</Text>
-        <Text style={{ color: c.text, fontFamily: fontFamilies.mono, fontSize: 13 }}>
-          {range.step < 1 ? value.toFixed(2) : String(value)}
-        </Text>
-      </View>
-      <Slider
-        value={value}
-        minimumValue={range.min}
-        maximumValue={range.max}
-        step={range.step}
-        onValueChange={onChange}
-        minimumTrackTintColor={c.brand}
-        maximumTrackTintColor={c.hairline}
-        thumbTintColor={c.brand}
-        style={{ height: 40 }}
-      />
-    </View>
-  );
-}
-
-const paramStyles = StyleSheet.create({
-  row: { marginBottom: 12 },
-  labelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
-});
+import type { SessionRecord, PromptPreset } from '@/types';
+import ParamEditor from '@/components/params/ParamEditor';
+import { ensureFileParams } from '@/lib/modelMeta';
+import { parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from '@/lib/params';
 
 export default function ChatSettingsScreen() {
   const theme = useTheme<AppTheme>();
@@ -52,8 +22,9 @@ export default function ChatSettingsScreen() {
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [useDefaultPrompt, setUseDefaultPrompt] = useState(true);
   const [promptText, setPromptText] = useState('');
-  const [useDefaultParams, setUseDefaultParams] = useState(true);
-  const [params, setParams] = useState<GenParams>({ ...DEFAULT_GEN_PARAMS });
+  const [overrides, setOverrides] = useState<ParamSet>({});
+  const [inherited, setInherited] = useState<ResolvedParams>(() => resolveParams({}));
+  const [modelName, setModelName] = useState<string | null>(null);
   const [presets, setPresets] = useState<PromptPreset[]>([]);
   const [presetMenu, setPresetMenu] = useState(false);
   const [saveDialog, setSaveDialog] = useState(false);
@@ -70,13 +41,17 @@ export default function ChatSettingsScreen() {
       setSession(s);
       setUseDefaultPrompt(s.systemPromptOverride == null);
       setPromptText(s.systemPromptOverride ?? settings.defaultSystemPrompt);
-      const hasOverride = s.paramsOverride != null;
-      setUseDefaultParams(!hasOverride);
-      if (hasOverride) {
-        try { setParams({ ...DEFAULT_GEN_PARAMS, ...JSON.parse(s.paramsOverride!) }); } catch {}
-      } else {
-        setParams({ ...settings.defaultParams });
-      }
+      setOverrides(parseParamSet(s.paramsOverride));
+      // Inherited: all chats < model file < this model, for the chat's model.
+      const modelId = s.modelId ?? (await db.getSetting('lastModelId'));
+      let model = modelId ? await db.getModel(modelId) : null;
+      if (model) model = await ensureFileParams(model);
+      setModelName(model?.displayName ?? null);
+      setInherited(resolveParams({
+        global: await db.getGlobalParams(),
+        file: parseParamSet(model?.fileParams),
+        model: parseParamSet(model?.paramsOverride),
+      }));
       const p = await db.getAllPresets();
       setPresets(p);
     })();
@@ -120,26 +95,9 @@ export default function ChatSettingsScreen() {
     }
   };
 
-  const toggleDefaultParams = (val: boolean) => {
-    setUseDefaultParams(val);
-    if (val) {
-      autoSave({ paramsOverride: null });
-    } else {
-      autoSave({ paramsOverride: JSON.stringify(params) });
-    }
-  };
-
-  const updateParam = (key: keyof GenParams, value: number) => {
-    const next = { ...params, [key]: value };
-    setParams(next);
-    if (!useDefaultParams) {
-      autoSave({ paramsOverride: JSON.stringify(next) });
-    }
-  };
-
-  const resetParams = () => {
-    setParams({ ...settings.defaultParams });
-    autoSave({ paramsOverride: JSON.stringify(settings.defaultParams) });
+  const updateOverrides = (next: ParamSet) => {
+    setOverrides(next);
+    autoSave({ paramsOverride: serializeParamSet(next) });
   };
 
   const savePreset = async () => {
@@ -191,30 +149,12 @@ export default function ChatSettingsScreen() {
           </>
         )}
 
-        {/* Parameters */}
-        <Text style={[styles.sectionTitle, { color: c.text, fontFamily: fontFamilies.interSemiBold, marginTop: spacing.md }]}>Parameters</Text>
-        <View style={styles.switchRow}>
-          <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 15, flex: 1 }}>Use global defaults</Text>
-          <Switch value={useDefaultParams} onValueChange={toggleDefaultParams} color={c.brand} />
-        </View>
-        {!useDefaultParams && (
-          <>
-            {(Object.keys(PARAM_RANGES) as (keyof GenParams)[]).map((key) => (
-              <ParamSlider
-                key={key}
-                label={PARAM_LABELS[key]}
-                value={params[key]}
-                range={PARAM_RANGES[key]}
-                onChange={(v) => updateParam(key, v)}
-                mono={false}
-              />
-            ))}
-            <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12 }}>
-              Changing context length or threads reloads the model on next message.
-            </Text>
-            <Button mode="text" onPress={resetParams} textColor={c.brand}>Reset to defaults</Button>
-          </>
-        )}
+        {/* llama.cpp settings */}
+        <Text style={[styles.sectionTitle, { color: c.text, fontFamily: fontFamilies.interSemiBold, marginTop: spacing.md }]}>Settings for this chat</Text>
+        <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>
+          Override settings for this chat only. Everything else comes from Settings{modelName ? ` and ${modelName}` : ''}.
+        </Text>
+        <ParamEditor overrides={overrides} inherited={inherited} onChange={updateOverrides} />
       </ScrollView>
 
       <Portal>

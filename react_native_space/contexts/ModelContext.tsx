@@ -1,19 +1,19 @@
 import React, { createContext, useContext, useState, useCallback, useRef, type ReactNode } from 'react';
 import { Platform } from 'react-native';
-import type { ModelRecord, ModelStatus, GenParams } from '@/types';
+import type { ModelRecord, ModelStatus } from '@/types';
+import type { ParamSet } from '@/lib/params';
 import * as llama from '@/lib/llama';
 import * as db from '@/lib/db';
 
 interface ModelCtx {
   loadedModelId: string | null;
   loadedModel: ModelRecord | null;
-  loadedCtxParams: { contextLength: number; threads: number } | null;
   status: ModelStatus;
   error: string | null;
   errorDetails: string | null;
   isGenerating: boolean;
   /** Resolves true if the model is loaded and ready afterwards. */
-  loadModel: (model: ModelRecord, ctxParams: { contextLength: number; threads: number }) => Promise<boolean>;
+  loadModel: (model: ModelRecord, loadParams: ParamSet) => Promise<boolean>;
   unload: () => Promise<void>;
   setGenerating: (v: boolean) => void;
 }
@@ -21,7 +21,6 @@ interface ModelCtx {
 const Ctx = createContext<ModelCtx>({
   loadedModelId: null,
   loadedModel: null,
-  loadedCtxParams: null,
   status: 'idle',
   error: null,
   errorDetails: null,
@@ -34,7 +33,6 @@ const Ctx = createContext<ModelCtx>({
 export function ModelProvider({ children }: { children: ReactNode }) {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [loadedModel, setLoadedModel] = useState<ModelRecord | null>(null);
-  const [loadedCtxParams, setLoadedCtxParams] = useState<{ contextLength: number; threads: number } | null>(null);
   const [status, setStatus] = useState<ModelStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
@@ -43,7 +41,7 @@ export function ModelProvider({ children }: { children: ReactNode }) {
   // runs, instead of silently returning while the first is still loading.
   const loadChain = useRef<Promise<unknown>>(Promise.resolve());
 
-  const loadOnce = useCallback(async (model: ModelRecord, ctxParams: { contextLength: number; threads: number }): Promise<boolean> => {
+  const loadOnce = useCallback(async (model: ModelRecord, loadParams: ParamSet): Promise<boolean> => {
     setStatus('loading');
     setError(null);
     setErrorDetails(null);
@@ -62,10 +60,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     } catch {}
 
     try {
-      await llama.loadModel(model, ctxParams);
+      await llama.loadModel(model, loadParams);
       setLoadedModelId(model.id);
       setLoadedModel(model);
-      setLoadedCtxParams({ ...ctxParams });
       setStatus('ready');
       db.setSetting('lastModelId', model.id).catch(() => {});
       return true;
@@ -74,7 +71,6 @@ export function ModelProvider({ children }: { children: ReactNode }) {
       // nothing is loaded any more.
       setLoadedModelId(null);
       setLoadedModel(null);
-      setLoadedCtxParams(null);
       setError("Couldn't load this file. It may not be a valid GGUF model or may be corrupted.");
       setErrorDetails(e?.message ?? String(e));
       setStatus('error');
@@ -82,9 +78,9 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const doLoad = useCallback((model: ModelRecord, ctxParams: { contextLength: number; threads: number }): Promise<boolean> => {
+  const doLoad = useCallback((model: ModelRecord, loadParams: ParamSet): Promise<boolean> => {
     if (Platform.OS === 'web') return Promise.resolve(false);
-    const next = loadChain.current.catch(() => {}).then(() => loadOnce(model, ctxParams));
+    const next = loadChain.current.catch(() => {}).then(() => loadOnce(model, loadParams));
     loadChain.current = next;
     return next;
   }, [loadOnce]);
@@ -93,14 +89,13 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     await llama.releaseModel();
     setLoadedModelId(null);
     setLoadedModel(null);
-    setLoadedCtxParams(null);
     setStatus('idle');
     setError(null);
     setErrorDetails(null);
   }, []);
 
   return (
-    <Ctx.Provider value={{ loadedModelId, loadedModel, loadedCtxParams, status, error, errorDetails, isGenerating, loadModel: doLoad, unload, setGenerating }}>
+    <Ctx.Provider value={{ loadedModelId, loadedModel, status, error, errorDetails, isGenerating, loadModel: doLoad, unload, setGenerating }}>
       {children}
     </Ctx.Provider>
   );

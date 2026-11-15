@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
-import type { GenParams, ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
-import { DEFAULT_GEN_PARAMS } from '@/types';
+import type { ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
+import { APP_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
 
@@ -93,6 +93,11 @@ async function createTables() {
     );
   `);
 
+  // Columns added after the first release
+  const modelCols = ((await db.getAllAsync('PRAGMA table_info(models)')) as { name: string }[]).map((c) => c.name);
+  if (!modelCols.includes('fileParams')) await db.execAsync('ALTER TABLE models ADD COLUMN fileParams TEXT');
+  if (!modelCols.includes('paramsOverride')) await db.execAsync('ALTER TABLE models ADD COLUMN paramsOverride TEXT');
+
   // FTS triggers
   await db.execAsync(`
     CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
@@ -123,17 +128,35 @@ export async function setSetting(key: string, value: string): Promise<void> {
   await db.runAsync('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)', [key, value]);
 }
 
-export async function getDefaultParams(): Promise<GenParams> {
-  const raw = await getSetting('defaultParams');
-  if (!raw) return { ...DEFAULT_GEN_PARAMS };
-  try { return { ...DEFAULT_GEN_PARAMS, ...JSON.parse(raw) }; } catch { return { ...DEFAULT_GEN_PARAMS }; }
+/** Settings for all chats ("All chats" layer). */
+export async function getGlobalParams(): Promise<ParamSet> {
+  const raw = await getSetting('globalParams');
+  if (raw != null) return parseParamSet(raw);
+  // The first app version stored a full set of 8 values under 'defaultParams'
+  // whenever any slider moved. Keep only the ones that differ from the app's
+  // defaults, so untouched values don't show up as customized.
+  const legacy = parseParamSet(await getSetting('defaultParams'));
+  for (const [k, v] of Object.entries(legacy)) {
+    if (APP_DEFAULTS[k] === v) delete legacy[k];
+  }
+  return legacy;
 }
 
-export async function getEffectiveParams(session: SessionRecord | null): Promise<GenParams> {
-  if (session?.paramsOverride) {
-    try { return { ...DEFAULT_GEN_PARAMS, ...JSON.parse(session.paramsOverride) }; } catch {}
-  }
-  return getDefaultParams();
+export async function setGlobalParams(set: ParamSet): Promise<void> {
+  await setSetting('globalParams', serializeParamSet(set) ?? '{}');
+}
+
+/**
+ * Effective settings for generating in `session` with `model`:
+ * app defaults < all chats < model file < this model < this chat.
+ */
+export async function getEffectiveParams(session: SessionRecord | null, model: ModelRecord | null): Promise<ResolvedParams> {
+  return resolveParams({
+    global: await getGlobalParams(),
+    file: parseParamSet(model?.fileParams),
+    model: parseParamSet(model?.paramsOverride),
+    chat: parseParamSet(session?.paramsOverride),
+  });
 }
 
 export async function getEffectiveSystemPrompt(session: SessionRecord | null): Promise<string> {
@@ -160,9 +183,9 @@ export async function insertModel(m: ModelRecord): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.runAsync(
-    `INSERT INTO models (id, displayName, fileName, filePath, fileSizeBytes, quantization, architecture, parameterLabel, detectedTemplate, templateOverride, trainedContext, addedAt)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [m.id, m.displayName, m.fileName, m.filePath, m.fileSizeBytes, m.quantization, m.architecture, m.parameterLabel, m.detectedTemplate, m.templateOverride, m.trainedContext, m.addedAt]
+    `INSERT INTO models (id, displayName, fileName, filePath, fileSizeBytes, quantization, architecture, parameterLabel, detectedTemplate, templateOverride, trainedContext, addedAt, fileParams, paramsOverride)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [m.id, m.displayName, m.fileName, m.filePath, m.fileSizeBytes, m.quantization, m.architecture, m.parameterLabel, m.detectedTemplate, m.templateOverride, m.trainedContext, m.addedAt, m.fileParams, m.paramsOverride]
   );
 }
 
