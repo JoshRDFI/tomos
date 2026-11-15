@@ -24,8 +24,16 @@ export const APP_DEFAULTS: ParamSet = {
   penalty_repeat: 1.1,
   n_predict: 1024,
   n_ctx: 4096,
-  n_threads: 6,
+  // Phones mix fast and efficiency cores (Pixel 9 / Tensor G4: 4 fast + 4 slow).
+  // More threads than fast cores usually slows generation down.
+  n_threads: 4,
 };
+
+/**
+ * Defaults of the first app version. Its saved settings always held all of
+ * these, so values equal to them weren't chosen by the user.
+ */
+export const LEGACY_DEFAULTS: ParamSet = { ...APP_DEFAULTS, n_threads: 6 };
 
 /** Keys used by the app's first version, mapped to llama.rn names. */
 const LEGACY_KEYS: Record<string, string> = {

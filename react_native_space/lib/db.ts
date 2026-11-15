@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import type { ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
-import { APP_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
+import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
 
@@ -133,11 +133,11 @@ export async function getGlobalParams(): Promise<ParamSet> {
   const raw = await getSetting('globalParams');
   if (raw != null) return parseParamSet(raw);
   // The first app version stored a full set of 8 values under 'defaultParams'
-  // whenever any slider moved. Keep only the ones that differ from the app's
-  // defaults, so untouched values don't show up as customized.
+  // whenever any slider moved. Keep only the ones that differ from that
+  // version's defaults, so untouched values don't show up as customized.
   const legacy = parseParamSet(await getSetting('defaultParams'));
   for (const [k, v] of Object.entries(legacy)) {
-    if (APP_DEFAULTS[k] === v) delete legacy[k];
+    if (LEGACY_DEFAULTS[k] === v) delete legacy[k];
   }
   return legacy;
 }

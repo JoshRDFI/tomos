@@ -39,7 +39,7 @@ const sections = [
   {
     title: 'Performance tips',
     icon: 'speedometer',
-    body: `• 4–6 threads is usually fastest on modern phones.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
+    body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
   },
 ];
 
