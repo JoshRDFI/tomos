@@ -1,0 +1,557 @@
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable } from 'react-native';
+import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Drawer as DrawerLayout } from 'react-native-drawer-layout';
+import { FlashList } from '@shopify/flash-list';
+import { useRouter } from 'expo-router';
+import type { AppTheme } from '@/constants/theme';
+import { spacing, fontFamilies, typeScale } from '@/constants/theme';
+import { useModelContext } from '@/contexts/ModelContext';
+import { useSettings } from '@/contexts/SettingsContext';
+import * as db from '@/lib/db';
+import * as llama from '@/lib/llama';
+import type { SessionRecord, MessageRecord, ModelRecord, GenParams } from '@/types';
+import MessageBubble from '@/components/chat/MessageBubble';
+import ChatInput from '@/components/chat/ChatInput';
+import EmptyChat from '@/components/chat/EmptyChat';
+import DrawerContent from '@/components/drawer/DrawerContent';
+import WebNotice from '@/components/WebNotice';
+
+export default function ChatScreen() {
+  const theme = useTheme<AppTheme>();
+  const c = theme.appColors;
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth } = useWindowDimensions();
+  const router = useRouter();
+  const modelCtx = useModelContext();
+  const settings = useSettings();
+
+  // State
+  const [session, setSession] = useState<SessionRecord | null>(null);
+  const [messages, setMessages] = useState<MessageRecord[]>([]);
+  const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [models, setModels] = useState<ModelRecord[]>([]);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [snack, setSnack] = useState('');
+  const [streamingText, setStreamingText] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [editMode, setEditMode] = useState<{ messageId: string; text: string } | null>(null);
+  const [renameDialog, setRenameDialog] = useState<SessionRecord | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<SessionRecord | null>(null);
+  const [renameText, setRenameText] = useState('');
+  const [longPressMsg, setLongPressMsg] = useState<MessageRecord | null>(null);
+
+  // refs removed - DrawerLayout and FlashList v2 don't support them in this way
+  const isWeb = Platform.OS === 'web';
+
+  // Init
+  useEffect(() => {
+    if (isWeb) return;
+    (async () => {
+      try {
+        const allSessions = await db.getAllSessions();
+        setSessions(allSessions);
+        const allModels = await db.getAllModels();
+        setModels(allModels);
+
+        const lastId = await db.getSetting('lastSessionId');
+        let s = lastId ? await db.getSession(lastId) : null;
+        if (!s && allSessions.length > 0) s = allSessions[0] ?? null;
+        if (!s) {
+          const lastModelId = await db.getSetting('lastModelId');
+          s = await db.createSession(lastModelId);
+          setSessions((prev) => [s!, ...prev]);
+        }
+        if (s) {
+          setSession(s);
+          db.setSetting('lastSessionId', s.id).catch(() => {});
+          const msgs = await db.getSessionMessages(s.id);
+          setMessages(msgs);
+        }
+
+        // Auto-load last model
+        if (modelCtx.status === 'idle') {
+          const lastModelId = await db.getSetting('lastModelId');
+          if (lastModelId) {
+            const model = await db.getModel(lastModelId);
+            if (model) {
+              const params = s ? await db.getEffectiveParams(s) : settings.defaultParams;
+              modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Init error', e);
+      }
+    })();
+  }, [isWeb]);
+
+  // Refresh sessions/models on focus (simplified for non-web)
+  const refreshSessions = useCallback(async () => {
+    if (isWeb) return;
+    const s = await db.getAllSessions();
+    setSessions(s);
+    const m = await db.getAllModels();
+    setModels(m);
+  }, [isWeb]);
+
+  // Drawer back handler
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const handler = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (drawerOpen) {
+        setDrawerOpen(false);
+        return true;
+      }
+      return false;
+    });
+    return () => handler.remove();
+  }, [drawerOpen]);
+
+  // Switch session
+  const switchSession = useCallback(async (id: string) => {
+    if (isWeb) return;
+    const s = await db.getSession(id);
+    if (!s) return;
+    setSession(s);
+    const msgs = await db.getSessionMessages(s.id);
+    setMessages(msgs);
+    setDrawerOpen(false);
+    db.setSetting('lastSessionId', s.id).catch(() => {});
+  }, [isWeb]);
+
+  // New chat
+  const newChat = useCallback(async () => {
+    if (isWeb) return;
+    const modelId = modelCtx.loadedModelId ?? (await db.getSetting('lastModelId'));
+    const s = await db.createSession(modelId);
+    setSession(s);
+    setMessages([]);
+    setSessions((prev) => [s, ...prev]);
+    setDrawerOpen(false);
+    db.setSetting('lastSessionId', s.id).catch(() => {});
+  }, [isWeb, modelCtx.loadedModelId]);
+
+  // Send message
+  const sendMessage = useCallback(async (text: string) => {
+    if (isWeb || !session) return;
+    const model = modelCtx.loadedModel;
+    if (!model) return;
+
+    // If edit mode, update the message and delete subsequent
+    if (editMode) {
+      const editMsg = messages.find((m) => m.id === editMode.messageId);
+      if (editMsg) {
+        await db.updateMessage(editMsg.id, { content: text });
+        await db.deleteMessagesAfter(session.id, editMsg.createdAt);
+      }
+      setEditMode(null);
+    } else {
+      // Insert user message
+      const userMsg: MessageRecord = {
+        id: db.generateId(),
+        sessionId: session.id,
+        role: 'user',
+        content: text,
+        modelName: model.displayName,
+        tokenCount: null,
+        tokensPerSec: null,
+        stopped: 0,
+        createdAt: Date.now(),
+      };
+      await db.insertMessage(userMsg);
+
+      // Auto-title on first user message
+      const count = await db.getSessionMessageCount(session.id);
+      if (count <= 1) {
+        const title = text.slice(0, 40);
+        await db.updateSession(session.id, { title, updatedAt: Date.now() });
+        setSession((s) => s ? { ...s, title, updatedAt: Date.now() } : s);
+      }
+    }
+
+    // Reload messages
+    const currentMsgs = await db.getSessionMessages(session.id);
+    setMessages(currentMsgs);
+
+    // Ensure model is loaded with right params
+    const params = await db.getEffectiveParams(session);
+    const needReload = modelCtx.loadedModelId !== model.id ||
+      modelCtx.loadedCtxParams?.contextLength !== params.contextLength ||
+      modelCtx.loadedCtxParams?.threads !== params.threads;
+    if (needReload) {
+      await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+    }
+
+    // Generate
+    setIsStreaming(true);
+    setStreamingText('');
+    modelCtx.setGenerating(true);
+
+    // Keep awake
+    if (Platform.OS !== 'web') {
+      try {
+        const KA = await import('expo-keep-awake');
+        KA.activateKeepAwakeAsync('gen').catch(() => {});
+      } catch {}
+    }
+
+    try {
+      const systemPrompt = await db.getEffectiveSystemPrompt(session);
+      const chatMessages = [
+        ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+        ...currentMsgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content ?? '' })),
+      ];
+
+      let accumulated = '';
+      const result = await llama.generate(model, chatMessages, params, (token) => {
+        accumulated += token;
+        setStreamingText(accumulated);
+      });
+
+      // Save assistant message
+      const asstMsg: MessageRecord = {
+        id: db.generateId(),
+        sessionId: session.id,
+        role: 'assistant',
+        content: result.content || accumulated,
+        modelName: model.displayName,
+        tokenCount: result.tokenCount,
+        tokensPerSec: result.tokensPerSec,
+        stopped: result.stopped ? 1 : 0,
+        createdAt: Date.now(),
+      };
+      await db.insertMessage(asstMsg);
+      await db.updateSession(session.id, { updatedAt: Date.now() });
+
+      const finalMsgs = await db.getSessionMessages(session.id);
+      setMessages(finalMsgs);
+    } catch (e) {
+      console.warn('Generation error', e);
+      setSnack('Generation failed: ' + String((e as any)?.message ?? e));
+    }
+
+    setIsStreaming(false);
+    setStreamingText('');
+    modelCtx.setGenerating(false);
+
+    if (Platform.OS !== 'web') {
+      try {
+        const KA = await import('expo-keep-awake');
+        KA.deactivateKeepAwake('gen');
+      } catch {}
+    }
+
+    refreshSessions();
+  }, [isWeb, session, modelCtx, editMode, messages, refreshSessions]);
+
+  // Stop
+  const handleStop = useCallback(() => {
+    llama.stopGeneration();
+  }, []);
+
+  // Copy
+  const handleCopy = useCallback(async (text: string) => {
+    if (Platform.OS !== 'web') {
+      try {
+        const Clip = await import('expo-clipboard');
+        await Clip.setStringAsync(text);
+        const H = await import('expo-haptics');
+        H.impactAsync(H.ImpactFeedbackStyle.Light).catch(() => {});
+      } catch {}
+    }
+    setSnack('Copied');
+  }, []);
+
+  // Regenerate
+  const handleRegenerate = useCallback(async () => {
+    if (!session || messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role !== 'assistant') return;
+    await db.deleteMessage(lastMsg.id);
+    const updated = await db.getSessionMessages(session.id);
+    setMessages(updated);
+    // Re-send from last user message
+    const lastUser = updated[updated.length - 1];
+    if (lastUser?.role === 'user') {
+      sendMessage(lastUser.content);
+    }
+  }, [session, messages, sendMessage]);
+
+  // Model switch
+  const handleModelSwitch = useCallback(async (model: ModelRecord) => {
+    setModelMenuOpen(false);
+    if (!session) return;
+    await db.updateSession(session.id, { modelId: model.id, updatedAt: Date.now() });
+    setSession((s) => s ? { ...s, modelId: model.id } : s);
+    const params = await db.getEffectiveParams(session);
+    await modelCtx.loadModel(model, { contextLength: params.contextLength, threads: params.threads });
+  }, [session, modelCtx]);
+
+  // Rename
+  const handleRename = useCallback(async () => {
+    if (!renameDialog || !renameText.trim()) return;
+    await db.updateSession(renameDialog.id, { title: renameText.trim() });
+    if (session?.id === renameDialog.id) {
+      setSession((s) => s ? { ...s, title: renameText.trim() } : s);
+    }
+    setRenameDialog(null);
+    refreshSessions();
+  }, [renameDialog, renameText, session, refreshSessions]);
+
+  // Delete session
+  const handleDelete = useCallback(async () => {
+    if (!deleteDialog) return;
+    await db.deleteSession(deleteDialog.id);
+    if (session?.id === deleteDialog.id) {
+      const remaining = sessions.filter((s) => s.id !== deleteDialog.id);
+      if (remaining.length > 0) {
+        await switchSession(remaining[0]!.id);
+      } else {
+        await newChat();
+      }
+    }
+    setDeleteDialog(null);
+    refreshSessions();
+  }, [deleteDialog, session, sessions, switchSession, newChat, refreshSessions]);
+
+  // Export
+  const handleExport = useCallback(async (s: SessionRecord, format: 'md' | 'txt') => {
+    if (isWeb) return;
+    try {
+      const msgs = await db.getSessionMessages(s.id);
+      let content = `${s.title}\n\n`;
+      for (const m of msgs) {
+        if (format === 'md') {
+          content += `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n${m.content}\n\n`;
+        } else {
+          content += `${m.role === 'user' ? 'You' : 'Assistant'}:\n${m.content}\n\n`;
+        }
+      }
+      const ext = format === 'md' ? '.md' : '.txt';
+      const { Paths, File } = await import('expo-file-system');
+      const file = new File(Paths.cache, `${s.title?.replace(/[^a-zA-Z0-9]/g, '_') ?? 'chat'}${ext}`);
+      await file.write(content);
+      const Sharing = await import('expo-sharing');
+      await Sharing.shareAsync(file.uri);
+    } catch (e) {
+      console.warn('Export error', e);
+    }
+  }, [isWeb]);
+
+  // Long press actions
+  const handleEditResend = useCallback(() => {
+    if (!longPressMsg || longPressMsg.role !== 'user') return;
+    setEditMode({ messageId: longPressMsg.id, text: longPressMsg.content });
+    setLongPressMsg(null);
+  }, [longPressMsg]);
+
+  // Render
+  const drawerWidth = Math.min(screenWidth * 0.84, 360);
+  const modelReady = modelCtx.status === 'ready';
+  const hasMessages = (messages?.length ?? 0) > 0;
+
+  const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
+    const isLastAssistant = item.role === 'assistant' && index === 0; // inverted list
+    const streaming = isStreaming && item.role === 'assistant' && index === 0;
+    return (
+      <MessageBubble
+        message={item}
+        isLast={isLastAssistant}
+        isStreaming={streaming}
+        streamingText={streaming ? streamingText : undefined}
+        onCopy={handleCopy}
+        onRegenerate={isLastAssistant ? handleRegenerate : undefined}
+        onLongPress={() => setLongPressMsg(item)}
+      />
+    );
+  }, [isStreaming, streamingText, handleCopy, handleRegenerate]);
+
+  // Build streaming placeholder for inverted list
+  const displayMessages = React.useMemo(() => {
+    const base = [...(messages ?? [])].reverse();
+    if (isStreaming) {
+      // Add a temporary streaming message at the top (index 0 of inverted)
+      const streamMsg: MessageRecord = {
+        id: '__streaming__',
+        sessionId: session?.id ?? '',
+        role: 'assistant',
+        content: '',
+        modelName: modelCtx.loadedModel?.displayName ?? null,
+        tokenCount: null,
+        tokensPerSec: null,
+        stopped: 0,
+        createdAt: Date.now(),
+      };
+      return [streamMsg, ...base];
+    }
+    return base;
+  }, [messages, isStreaming, session?.id, modelCtx.loadedModel?.displayName]);
+
+  const chatTopBar = (
+    <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top }]}>
+      <IconButton icon="menu" size={24} iconColor={c.text} onPress={() => setDrawerOpen(true)} accessibilityLabel="Open menu" />
+      <Pressable onPress={() => setModelMenuOpen(true)} style={styles.modelInfo}>
+        <Text numberOfLines={1} style={[styles.modelName, { color: c.text, fontFamily: typeScale.titleSmall.fontFamily }]}>
+          {modelCtx.loadedModel?.displayName ?? 'No model'}
+        </Text>
+        {modelCtx.loadedModel && (
+          <Text style={[styles.modelMeta, { color: c.textSecondary, fontFamily: fontFamilies.mono }]}>
+            {[modelCtx.loadedModel.quantization, modelCtx.loadedModel.parameterLabel].filter(Boolean).join(' · ')}
+          </Text>
+        )}
+      </Pressable>
+      <Menu
+        visible={modelMenuOpen}
+        onDismiss={() => setModelMenuOpen(false)}
+        anchor={<View />}
+        anchorPosition="bottom"
+      >
+        {models.map((m) => (
+          <Menu.Item
+            key={m.id}
+            onPress={() => handleModelSwitch(m)}
+            title={m.displayName}
+            leadingIcon={m.id === modelCtx.loadedModelId ? 'check' : undefined}
+          />
+        ))}
+        <Divider />
+        <Menu.Item onPress={() => { setModelMenuOpen(false); router.push('/models'); }} title="Manage models…" leadingIcon="chip" />
+      </Menu>
+      <IconButton
+        icon="tune-variant"
+        size={24}
+        iconColor={c.text}
+        onPress={() => session && router.push({ pathname: '/chat-settings', params: { sessionId: session.id } })}
+        accessibilityLabel="Chat settings"
+      />
+    </View>
+  );
+
+  // Status banner
+  const statusBanner = modelCtx.status === 'loading' ? (
+    <View style={[styles.banner, { backgroundColor: c.brandTint }]}>
+      <ActivityIndicator size="small" color={c.brand} />
+      <Text style={{ color: c.brand, fontFamily: fontFamilies.inter, fontSize: 13, flex: 1 }}>
+        Loading {modelCtx.loadedModel?.displayName ?? 'model'}… (first load can take 10–30 s)
+      </Text>
+    </View>
+  ) : modelCtx.status === 'error' ? (
+    <View style={[styles.banner, { backgroundColor: c.accent + '22' }]}>
+      <Text style={{ color: c.accent, fontFamily: fontFamilies.inter, fontSize: 13, flex: 1 }}>{modelCtx.error}</Text>
+    </View>
+  ) : null;
+
+  const mainContent = (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+      <View style={[styles.container, { backgroundColor: c.background }]}>
+        {chatTopBar}
+        {statusBanner}
+        {isWeb && <WebNotice />}
+        {!hasMessages && !isStreaming ? (
+          <EmptyChat
+            hasModels={(models?.length ?? 0) > 0}
+            loadedModel={modelCtx.loadedModel}
+            hasModelInLib={(models?.length ?? 0) > 0}
+            onSuggestion={(s) => sendMessage(s)}
+            onOpenModelMenu={() => setModelMenuOpen(true)}
+          />
+        ) : (
+          <View style={{ flex: 1 }}>
+            <FlashList
+              data={displayMessages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ paddingVertical: spacing.xs }}
+            />
+          </View>
+        )}
+        <ChatInput
+          onSend={sendMessage}
+          onStop={handleStop}
+          isGenerating={isStreaming}
+          modelReady={modelReady}
+          editMode={editMode ? { text: editMode.text, onCancel: () => setEditMode(null) } : null}
+        />
+      </View>
+    </KeyboardAvoidingView>
+  );
+
+  return (
+    <>
+      <DrawerLayout
+        drawerStyle={{ width: drawerWidth }}
+        drawerPosition="left"
+        open={drawerOpen}
+        onOpen={() => { setDrawerOpen(true); refreshSessions(); }}
+        onClose={() => setDrawerOpen(false)}
+        renderDrawerContent={() => (
+          <View style={{ flex: 1, paddingTop: insets.top }}>
+            <DrawerContent
+              sessions={sessions}
+              activeSessionId={session?.id ?? null}
+              onNewChat={newChat}
+              onSelectSession={switchSession}
+              onRename={(s) => { setRenameText(s.title); setRenameDialog(s); }}
+              onDelete={(s) => setDeleteDialog(s)}
+              onExport={handleExport}
+              onClose={() => setDrawerOpen(false)}
+            />
+          </View>
+        )}
+      >
+        {mainContent}
+      </DrawerLayout>
+
+      <Portal>
+        {/* Rename Dialog */}
+        <Dialog visible={!!renameDialog} onDismiss={() => setRenameDialog(null)}>
+          <Dialog.Title>Rename chat</Dialog.Title>
+          <Dialog.Content>
+            <PaperInput value={renameText} onChangeText={setRenameText} mode="outlined" />
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setRenameDialog(null)}>Cancel</Button>
+            <Button onPress={handleRename}>Save</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        {/* Delete Dialog */}
+        <Dialog visible={!!deleteDialog} onDismiss={() => setDeleteDialog(null)}>
+          <Dialog.Title>Delete this chat?</Dialog.Title>
+          <Dialog.Content><Text>This can't be undone.</Text></Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setDeleteDialog(null)}>Cancel</Button>
+            <Button onPress={handleDelete} textColor={c.error}>Delete</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        {/* Long press menu */}
+        <Dialog visible={!!longPressMsg} onDismiss={() => setLongPressMsg(null)}>
+          <Dialog.Content style={{ gap: 4 }}>
+            <Button icon="content-copy" onPress={() => { handleCopy(longPressMsg?.content ?? ''); setLongPressMsg(null); }}>Copy</Button>
+            {longPressMsg?.role === 'user' && (
+              <Button icon="pencil" onPress={handleEditResend}>Edit & resend</Button>
+            )}
+            {longPressMsg?.role === 'assistant' && longPressMsg?.id === messages?.[messages.length - 1]?.id && (
+              <Button icon="refresh" onPress={() => { setLongPressMsg(null); handleRegenerate(); }}>Regenerate</Button>
+            )}
+          </Dialog.Content>
+        </Dialog>
+      </Portal>
+
+      <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={2000}>{snack}</Snackbar>
+    </>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  topBar: { flexDirection: 'row', alignItems: 'center', height: 56, borderBottomWidth: StyleSheet.hairlineWidth },
+  modelInfo: { flex: 1 },
+  modelName: { fontSize: 15, lineHeight: 20 },
+  modelMeta: { fontSize: 12, lineHeight: 16 },
+  banner: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 8 },
+});

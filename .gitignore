@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+react_native_space/.yarn/*
+!react_native_space/.yarn/patches
+!react_native_space/.yarn/plugins
+!react_native_space/.yarn/releases
+!react_native_space/.yarn/sdks
+!react_native_space/.yarn/versions
+
+# Expo / build output
+.expo/
+dist/
+web-build/
+react_native_space/android/
+react_native_space/ios/
+*.apk
+*.aab
+*.tsbuildinfo
+
+# Signing material — never commit
+*.jks
+*.keystore
+*.p8
+*.p12
+*.pem
+*.key
+keystore.properties
+credentials.json
+google-services.json
+*service-account*.json
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Model files
+*.gguf
+
+# Generator platform metadata (Abacus.AI)
+.abacus.donotdelete
+.abacus_tsc_baseline.json
+.web_app_reference/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
