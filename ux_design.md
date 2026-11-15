@@ -12,7 +12,7 @@ App name **LLM Chat**, Android package `com.rdfindustries.llmchat`, URL scheme `
   - `expo-document-picker`, `expo-file-system` (copying files, free space), `expo-device` (`Device.totalMemory`)
   - `expo-keep-awake`, `expo-clipboard`, `expo-sharing`, `expo-haptics`
   - `react-native-drawer-layout`, `@shopify/flash-list` (v2), `@react-native-community/slider`
-  - Markdown is rendered by a small built-in renderer in `MessageBubble.tsx` (fenced code blocks, **bold**, `inline code`). Full markdown is **(planned)**.
+  - Markdown: `mdast-util-from-markdown` + GFM (`micromark-extension-gfm`) parse to an AST, drawn by `components/chat/Markdown.tsx`; `prismjs` for code highlighting.
   - `react-native-paper`, `@expo-google-fonts/inter`, `@expo-google-fonts/jetbrains-mono`
   - Icons: MaterialCommunityIcons only, never emoji.
 - `llama.rn` is pinned to an exact version (`0.13.0-rc.11`, bundling llama.cpp b12292). Update it deliberately and rerun `yarn licenses`.
@@ -192,7 +192,11 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
   - Body text, plain.
 - Assistant message:
   - Left-aligned and full width, `assistantBubble` colour, radius 18 with a 6 top-left corner.
-  - Rendered by the built-in renderer: fenced code blocks, **bold** and `inline code`. Headings, lists and tables are **(planned)** with full markdown and throttled streaming updates.
+  - Rendered as GitHub-flavoured markdown: headings, paragraphs, **bold**, *italic*, ~~strikethrough~~, `inline code`, links (http/https/mailto open in the browser), bullet, numbered and task lists (nested), block quotes, rules, and tables.
+    - Tables scroll sideways inside the bubble; the header row is semibold on `surfaceRaised`, cells have hairline borders.
+    - Code blocks: `codeBg` panel with a header (language, Copy → "Copied"), JetBrains Mono 13/19, horizontal scroll, Prism highlighting with the `syn*` theme colours (about 30 common languages; others plain).
+    - Images aren't loaded (offline app); they show as an "[image: alt]" link. Math and Mermaid show as source.
+    - While streaming, updates are throttled by render time (next update waits twice as long as the last one took to draw, at most 1 s), and the block cursor sits at the end of the last paragraph.
   - **Thinking** (reasoning models): a collapsible section above the answer, with a 2dp brand left rule, a `lightbulb-outline` icon and a secondary-colour label.
     - While the model thinks: "Thinking… 12 s" (live timer), expanded, streaming text in secondary colour, 14/21, with the block cursor. Only the last ~1500 characters are drawn while streaming.
     - Once the answer starts it collapses to "Thought for 12 s"; tapping toggles it. Saved replies show it collapsed.
@@ -491,7 +495,7 @@ No gradients and no glass effects.
 In order (tracked in Archon):
 1. ~~Layered llama.cpp settings, per-model settings, About & licenses~~ (done, `feature/model-settings`)
 2. ~~Separate thinking display~~ (done, `feature/thinking-display`)
-3. Full markdown rendering (headings, lists, tables, links) with throttled streaming updates.
+3. ~~Full markdown rendering (headings, lists, tables, links) with throttled streaming updates~~ (done, `feature/markdown`)
 4. Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages.
 5. Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix.
 6. Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata.

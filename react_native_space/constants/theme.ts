@@ -18,6 +18,14 @@ export const darkColors = {
   userBubble: '#1F3B37',
   assistantBubble: '#181D21',
   codeBg: '#0A0D0F',
+  // Code highlighting
+  synComment: '#6B747C',
+  synKeyword: '#C792EA',
+  synString: '#A5D6A7',
+  synNumber: '#F7A26B',
+  synFunction: '#82AAFF',
+  synType: '#4DB6A8',
+  synPunct: '#949CA4',
 } as const;
 
 export const lightColors = {
@@ -34,6 +42,14 @@ export const lightColors = {
   userBubble: '#DCEFEB',
   assistantBubble: '#FFFFFF',
   codeBg: '#F0F2F4',
+  // Code highlighting
+  synComment: '#6A737D',
+  synKeyword: '#8E3FB0',
+  synString: '#2E7D32',
+  synNumber: '#B5531A',
+  synFunction: '#1F5FBF',
+  synType: '#2B8478',
+  synPunct: '#5A636B',
 } as const;
 
 export type AppColors = {
@@ -50,6 +66,13 @@ export type AppColors = {
   userBubble: string;
   assistantBubble: string;
   codeBg: string;
+  synComment: string;
+  synKeyword: string;
+  synString: string;
+  synNumber: string;
+  synFunction: string;
+  synType: string;
+  synPunct: string;
 };
 
 // ── Fonts ──

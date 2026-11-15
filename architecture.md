@@ -35,7 +35,7 @@ react_native_space/
     settings/about.tsx    version, llama.cpp build, open-source licenses
     settings/presets.tsx  system prompt presets
   components/
-    chat/                 MessageBubble (built-in markdown subset), ChatInput, EmptyChat
+    chat/                 MessageBubble, Markdown (mdast → RN views), useThrottledText, ChatInput, EmptyChat
     drawer/               DrawerContent
     params/ParamEditor    the shared llama.cpp settings editor
   contexts/               SettingsContext (theme, default system prompt), ModelContext (load state)
@@ -51,6 +51,8 @@ react_native_space/
     gguf.ts               quant/size parsing from file names
     fts.ts                buildFtsQuery(): safe FTS5 MATCH strings
     thinking.ts           splitThinking(): separate <think> blocks from the answer
+    markdown.ts           toMdAst(): markdown + GFM → mdast (ported from DeepSeek's demo, MIT)
+    highlight.ts          Prism languages/aliases; highlightCode() → flat styled runs
   constants/theme.ts      tokens, type scale, spacing, radii (no inline hex elsewhere)
   constants/licenses.json generated; see "Licenses"
   scripts/generate-licenses.mjs
@@ -136,3 +138,5 @@ Signing keys and keystore files never go in the repo (`.gitignore` blocks them).
 - **llama.rn** stays pinned to an exact version. Upgrading it changes the bundled llama.cpp: check the changelog, rerun tests and `yarn licenses`, and test on a device.
 - Keep pure logic in `lib/` with unit tests. `yarn typecheck` and `yarn test` must pass before committing.
 - Code ported from DeepSeek's MIT chat demo keeps its MIT notice.
+- **Markdown** packages (`mdast-*`, `micromark*`, …) are ESM-only. Jest transforms them through `transformIgnorePatterns` in `package.json`; add any new ESM dependency there too.
+- New Prism languages are static imports in `lib/highlight.ts`, after any language they extend.

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, Pressable, ScrollView, Platform } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
 import { Text, IconButton, useTheme, Icon } from 'react-native-paper';
 import type { AppTheme } from '@/constants/theme';
-import { spacing, radii, typeScale, fontFamilies } from '@/constants/theme';
+import { spacing, radii, fontFamilies } from '@/constants/theme';
+import Markdown from './Markdown';
 import type { MessageRecord } from '@/types';
 import type { StreamView } from '@/lib/llama';
 import { splitThinking, formatThinkingTime } from '@/lib/thinking';
@@ -72,38 +73,6 @@ const thinkStyles = StyleSheet.create({
   text: { fontSize: 14, lineHeight: 21, marginTop: 4 },
 });
 
-interface CodeBlockProps {
-  language: string;
-  code: string;
-  onCopy: (text: string) => void;
-}
-
-function CodeBlock({ language, code, onCopy }: CodeBlockProps) {
-  const theme = useTheme<AppTheme>();
-  const c = theme.appColors;
-  return (
-    <View style={[codeStyles.container, { backgroundColor: c.codeBg, borderColor: c.hairline }]}>
-      <View style={codeStyles.header}>
-        <Text style={[codeStyles.lang, { color: c.textSecondary, fontFamily: fontFamilies.mono }]}>{language || 'code'}</Text>
-        <Pressable onPress={() => onCopy(code)} hitSlop={8}>
-          <Text style={[codeStyles.copyBtn, { color: c.brand, fontFamily: fontFamilies.monoMedium }]}>Copy</Text>
-        </Pressable>
-      </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <Text style={[codeStyles.code, { color: c.text, fontFamily: fontFamilies.mono }]} selectable>{code}</Text>
-      </ScrollView>
-    </View>
-  );
-}
-
-const codeStyles = StyleSheet.create({
-  container: { borderRadius: 8, borderWidth: StyleSheet.hairlineWidth, marginVertical: 6, overflow: 'hidden' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: '#2A3035' },
-  lang: { fontSize: 11 },
-  copyBtn: { fontSize: 12 },
-  code: { fontSize: 13, lineHeight: 18, padding: 12 },
-});
-
 interface Props {
   message: MessageRecord;
   isLast: boolean;
@@ -113,58 +82,6 @@ interface Props {
   onCopy: (text: string) => void;
   onRegenerate?: () => void;
   onLongPress?: () => void;
-}
-
-function renderContent(text: string, onCopy: (t: string) => void, c: any) {
-  const parts: React.ReactNode[] = [];
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-  let key = 0;
-
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(
-        <Text key={key++} style={[{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 16, lineHeight: 24 }]} selectable>
-          {text.slice(lastIndex, match.index)}
-        </Text>
-      );
-    }
-    parts.push(<CodeBlock key={key++} language={match[1] ?? ''} code={match[2] ?? ''} onCopy={onCopy} />);
-    lastIndex = match.index + match[0].length;
-  }
-  if (lastIndex < text.length) {
-    parts.push(
-      <Text key={key++} style={[{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 16, lineHeight: 24 }]} selectable>
-        {renderInlineMarkdown(text.slice(lastIndex), c)}
-      </Text>
-    );
-  }
-  if (parts.length === 0) {
-    parts.push(
-      <Text key="empty" style={[{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 16, lineHeight: 24 }]} selectable>
-        {text}
-      </Text>
-    );
-  }
-  return parts;
-}
-
-function renderInlineMarkdown(text: string, c: any): React.ReactNode[] {
-  // Simple bold / inline code rendering
-  const parts: React.ReactNode[] = [];
-  const regex = /(\*\*(.+?)\*\*)|(`(.+?)`)/g;
-  let lastIdx = 0;
-  let m: RegExpExecArray | null;
-  let k = 0;
-  while ((m = regex.exec(text)) !== null) {
-    if (m.index > lastIdx) parts.push(text.slice(lastIdx, m.index));
-    if (m[2]) parts.push(<Text key={k++} style={{ fontFamily: fontFamilies.interSemiBold }}>{m[2]}</Text>);
-    if (m[4]) parts.push(<Text key={k++} style={{ fontFamily: fontFamilies.mono, fontSize: 14, backgroundColor: c.codeBg, borderRadius: 3, paddingHorizontal: 3 }}>{m[4]}</Text>);
-    lastIdx = m.index + m[0].length;
-  }
-  if (lastIdx < text.length) parts.push(text.slice(lastIdx));
-  return parts;
 }
 
 export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onLongPress }: Props) {
@@ -210,8 +127,9 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
             {(thinking.length > 0 || thinkingActive) && (
               <ThinkingBlock text={thinking} active={thinkingActive} streaming={isStreaming} ms={message.thinkingMs} />
             )}
-            {(displayText.length > 0 || (isStreaming && !thinkingActive)) &&
-              renderContent(displayText + (isStreaming ? ' █' : ''), onCopy, c)}
+            {(displayText.length > 0 || (isStreaming && !thinkingActive)) && (
+              <Markdown content={displayText} streaming={isStreaming} onCopy={onCopy} />
+            )}
           </View>
         )}
       </View>

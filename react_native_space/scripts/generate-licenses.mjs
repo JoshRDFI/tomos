@@ -8,6 +8,7 @@
  * - native: C/C++ code that llama.rn compiles into the app (llama.cpp and the
  *   libraries it vendors), which npm metadata doesn't cover.
  * - fonts: the bundled Inter and JetBrains Mono fonts (SIL OFL).
+ * - source code adapted from other projects (DeepSeek chat demo, MIT).
  *
  * Run after changing dependencies:  yarn licenses
  */
@@ -130,6 +131,32 @@ const fonts = [
   { name: 'JetBrains Mono (font)', version: '', license: 'OFL-1.1', url: 'https://github.com/JetBrains/JetBrainsMono', text: fromFile(path.join(nm, '@expo-google-fonts', 'jetbrains-mono', 'LICENSE_FONT')) },
 ];
 
+// ── source code adapted into this app (see the notices in those files) ──
+const DEEPSEEK_MIT = `MIT License
+
+Copyright (c) 2026 DeepSeek
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.`;
+const adapted = [
+  { name: 'DeepSeek chat demo (markdown, branching, backup)', version: '', license: 'MIT', url: 'https://github.com/deepseek-ai/chat-demo', text: DEEPSEEK_MIT },
+];
+
 // Deduplicate identical texts (most MIT files differ only by copyright line,
 // but many packages from one org share a file).
 const texts = [];
@@ -148,6 +175,7 @@ const out = {
   sections: [
     { title: 'On-device inference (native code)', items: native.map(withTextRef) },
     { title: 'Fonts', items: fonts.map(withTextRef) },
+    { title: 'Adapted source code', items: adapted.map(withTextRef) },
     { title: 'JavaScript packages', items: npm.map(withTextRef) },
   ],
   texts,
