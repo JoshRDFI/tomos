@@ -79,10 +79,12 @@ export default function ModelsScreen() {
       const destFileName = `${id}-${name}`;
       const dest = new File(modelsDir, destFileName);
 
-      // Copy file
-      const sourceFile = new File(asset.uri);
+      // The picker returns a content:// URI. The new File API can't copy from
+      // those (it needs a real path), so use the legacy copyAsync, which
+      // streams through the content resolver without loading the file into memory.
+      const { copyAsync } = await import('expo-file-system/legacy');
       copiedFile = dest;
-      await sourceFile.copy(dest);
+      await copyAsync({ from: asset.uri, to: dest.uri });
 
       const fileSize = asset.size || dest.size || 0;
 
