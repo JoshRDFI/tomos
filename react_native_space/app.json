@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "Android Llm Chat",
-    "slug": "abacusai-mobile-apps",
+    "name": "LLM Chat",
+    "slug": "llm-chat",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.abacusai.androidllmchat.t1794697096",
+      "bundleIdentifier": "com.rdfindustries.llmchat",
       "buildNumber": "1"
     },
     "android": {
@@ -19,24 +19,8 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.abacusai.androidllmchat.t1794697096",
-      "versionCode": 1,
-      "intentFilters": [
-        {
-          "action": "VIEW",
-          "autoVerify": true,
-          "data": [
-            {
-              "scheme": "abacusai1794697096",
-              "host": "*"
-            }
-          ],
-          "category": [
-            "BROWSABLE",
-            "DEFAULT"
-          ]
-        }
-      ]
+      "package": "com.rdfindustries.llmchat",
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png",
@@ -47,6 +31,6 @@
       "llama.rn",
       "expo-sqlite"
     ],
-    "scheme": "abacusai1794697096"
+    "scheme": "llmchat"
   }
 }
