@@ -206,6 +206,7 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 - Footer row under each assistant message (caption mono, secondary colour):
   - `412 tok · 18.3 tok/s`, plus `· stopped` when stopped.
   - Icon buttons: copy (`content-copy`) on every assistant message; regenerate (`refresh`) only on the last one.
+- **Version switcher** on any message with other versions (from regenerating or editing): `‹ 2/3 ›` (chevron icon buttons, mono caption), at the start of the assistant footer or right-aligned under a user bubble. Switching shows that version and the conversation that followed it. Hidden while a reply is generating.
 - While streaming:
   - The bubble shows text as it arrives, with a blinking block cursor ▍.
   - Before the first token, it shows three pulsing dots.
@@ -218,10 +219,10 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 
 **Edit & resend**
 - The composer switches to edit mode with the text prefilled and an "Editing message" chip with a ✕ (`close`) to cancel.
-- Send updates that message, deletes every later message in the session, then generates a new reply.
+- Send adds the edited text as a new version of that message and generates a reply to it. The original message and everything after it are kept as the other version (switch back with ‹ ›).
 
 **Regenerate**
-- Deletes the last assistant message and generates again from the same history (the user message is not duplicated). Sending, regenerating and switching models are blocked while a reply is generating.
+- Generates a new version of the last reply from the same history (the user message is not duplicated). The old reply is hidden while the new one streams and stays available in the switcher. If the new reply is stopped before producing anything, the old one shows again. Sending, regenerating and switching models are blocked while a reply is generating.
 
 **Composer** (docked bottom, surface colour, safe-area aware)
 - Multiline TextInput, 1–6 lines, placeholder "Message".
@@ -496,7 +497,7 @@ In order (tracked in Archon):
 1. ~~Layered llama.cpp settings, per-model settings, About & licenses~~ (done, `feature/model-settings`)
 2. ~~Separate thinking display~~ (done, `feature/thinking-display`)
 3. ~~Full markdown rendering (headings, lists, tables, links) with throttled streaming updates~~ (done, `feature/markdown`)
-4. Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages.
+4. ~~Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages~~ (done, `feature/branching`)
 5. Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix.
 6. Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata.
 </roadmap>

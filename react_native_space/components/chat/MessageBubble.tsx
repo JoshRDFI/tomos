@@ -82,9 +82,26 @@ interface Props {
   onCopy: (text: string) => void;
   onRegenerate?: () => void;
   onLongPress?: () => void;
+  /** Show the previous (-1) or next (+1) version of this message. */
+  onSwitchVersion?: (delta: number) => void;
 }
 
-export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onLongPress }: Props) {
+/** "‹ 2/3 ›" for a message that has other versions. */
+function VersionSwitcher({ index, count, onSwitch }: { index: number; count: number; onSwitch: (delta: number) => void }) {
+  const theme = useTheme<AppTheme>();
+  const c = theme.appColors;
+  return (
+    <View style={styles.versions}>
+      <IconButton icon="chevron-left" size={16} iconColor={c.textSecondary} disabled={index === 0} onPress={() => onSwitch(-1)} accessibilityLabel="Previous version" style={styles.footerBtn} />
+      <Text style={[styles.stats, { color: c.textSecondary, fontFamily: fontFamilies.mono }]} accessibilityLabel={`Version ${index + 1} of ${count}`}>
+        {index + 1}/{count}
+      </Text>
+      <IconButton icon="chevron-right" size={16} iconColor={c.textSecondary} disabled={index === count - 1} onPress={() => onSwitch(1)} accessibilityLabel="Next version" style={styles.footerBtn} />
+    </View>
+  );
+}
+
+export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onLongPress, onSwitchVersion }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const isUser = message.role === 'user';
@@ -99,6 +116,9 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
   }, [isStreaming, stream, isUser, message.reasoning, message.content]);
   const displayText = answer;
   const thinkingActive = isStreaming && !!stream?.thinkingOpen;
+  const versions = message.versions && onSwitchVersion
+    ? <VersionSwitcher index={message.versions.index} count={message.versions.ids.length} onSwitch={onSwitchVersion} />
+    : null;
 
   const bubbleStyle = useMemo(() => ([
     styles.bubble,
@@ -133,8 +153,12 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
           </View>
         )}
       </View>
-      {!isUser && !isStreaming && (answer.length > 0 || thinking.length > 0) && (
+      {isUser && versions && (
+        <View style={[styles.footer, { alignSelf: 'flex-end' }]}>{versions}</View>
+      )}
+      {!isUser && !isStreaming && (answer.length > 0 || thinking.length > 0 || !!versions) && (
         <View style={styles.footer}>
+          {versions}
           {(message.tokenCount ?? 0) > 0 && (
             <Text style={[styles.stats, { color: c.textSecondary, fontFamily: fontFamilies.mono }]}>
               {message.tokenCount} tok · {(message.tokensPerSec ?? 0)?.toFixed?.(1)} tok/s
@@ -157,4 +181,5 @@ const styles = StyleSheet.create({
   footer: { flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.md, marginTop: 2 },
   stats: { fontSize: 12, lineHeight: 16 },
   footerBtn: { margin: 0, width: 32, height: 32 },
+  versions: { flexDirection: 'row', alignItems: 'center', marginRight: 4 },
 });

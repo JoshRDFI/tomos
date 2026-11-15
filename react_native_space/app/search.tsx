@@ -51,7 +51,11 @@ export default function SearchScreen() {
   const handleSelect = useCallback(async (r: SearchResult) => {
     // The chat screen re-reads lastSessionId when it regains focus and
     // switches to it, so save it before navigating back.
-    try { await db.setSetting('lastSessionId', r.sessionId); } catch {}
+    try {
+      await db.setSetting('lastSessionId', r.sessionId);
+      // The hit may be in a version that isn't shown; switch to it.
+      await db.revealMessage(r.sessionId, r.messageId);
+    } catch {}
     router.back();
   }, [router]);
 

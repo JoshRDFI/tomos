@@ -104,6 +104,10 @@ export default function ChatScreen() {
 
   // On returning to this screen: pick up session edits (chat settings), a
   // session chosen from search, and models added/removed on the Models screen.
+  // Guards against a second send while one is generating (state updates are
+  // async, so isStreaming alone can let a fast double-tap through).
+  const generatingRef = useRef(false);
+
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = session?.id ?? null;
   useFocusEffect(
@@ -117,10 +121,12 @@ export default function ChatScreen() {
         const target = (await db.getSession(targetId)) ?? (await db.getSession(currentId));
         if (cancelled || !target) return;
         setSession(target);
-        if (target.id !== currentId) {
+        // Reload messages too: a search hit may have selected another branch.
+        // Not while generating, which shows the history being replied to.
+        if (target.id !== currentId || !generatingRef.current) {
           const msgs = await db.getSessionMessages(target.id);
           if (!cancelled) setMessages(msgs);
-          setEditMode(null);
+          if (target.id !== currentId) setEditMode(null);
         }
         refreshSessions();
       })().catch((e) => console.warn('Focus refresh error', e));
@@ -165,18 +171,17 @@ export default function ChatScreen() {
     db.setSetting('lastSessionId', s.id).catch(() => {});
   }, [isWeb, modelCtx.loadedModelId]);
 
-  // Guards against a second send while one is generating (state updates are
-  // async, so isStreaming alone can let a fast double-tap through).
-  const generatingRef = useRef(false);
 
-  // Generate an assistant reply to the session's current messages.
-  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord) => {
+  // Generate a reply to `parentId` (a user message) from the conversation
+  // leading up to it. The reply is added as a new version under that message.
+  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord, parentId: string) => {
     // Re-read the session so edits made on the chat-settings screen apply.
     const fresh = await db.getSession(sessionId);
     if (!fresh) return;
     setSession(fresh);
 
-    const currentMsgs = await db.getSessionMessages(sessionId);
+    // While regenerating, the reply being replaced is hidden.
+    const currentMsgs = await db.getMessagePath(sessionId, parentId);
     setMessages(currentMsgs);
 
     // Effective settings (all chats < model file < this model < this chat);
@@ -232,6 +237,7 @@ export default function ChatScreen() {
           createdAt: Date.now(),
           reasoning: result.reasoning || null,
           thinkingMs: result.thinkingMs,
+          parentId,
         };
         await db.insertMessage(asstMsg);
       }
@@ -260,36 +266,38 @@ export default function ChatScreen() {
     if (!model) return;
     generatingRef.current = true;
     try {
+      // An edit becomes a new version of the edited message; the old version
+      // and the replies after it stay available through the version switcher.
+      let parentId: string | null;
       if (editMode) {
-        // Update the edited message and drop everything after it
         const editMsg = messages.find((m) => m.id === editMode.messageId);
-        if (editMsg) {
-          await db.updateMessage(editMsg.id, { content: text });
-          await db.deleteMessagesAfter(session.id, editMsg.createdAt);
-        }
+        parentId = editMsg ? (editMsg.parentId ?? null) : (messages[messages.length - 1]?.id ?? null);
         setEditMode(null);
       } else {
-        const userMsg: MessageRecord = {
-          id: db.generateId(),
-          sessionId: session.id,
-          role: 'user',
-          content: text,
-          modelName: model.displayName,
-          tokenCount: null,
-          tokensPerSec: null,
-          stopped: 0,
-          createdAt: Date.now(),
-        };
-        await db.insertMessage(userMsg);
+        const path = await db.getSessionMessages(session.id);
+        parentId = path[path.length - 1]?.id ?? null;
+      }
+      const userMsg: MessageRecord = {
+        id: db.generateId(),
+        sessionId: session.id,
+        role: 'user',
+        content: text,
+        modelName: model.displayName,
+        tokenCount: null,
+        tokensPerSec: null,
+        stopped: 0,
+        createdAt: Date.now(),
+        parentId,
+      };
+      await db.insertMessage(userMsg);
 
-        // Auto-title on first user message
-        const count = await db.getSessionMessageCount(session.id);
-        if (count <= 1) {
-          await db.updateSession(session.id, { title: text.slice(0, 40), updatedAt: Date.now() });
-        }
+      // Auto-title on first user message
+      const count = await db.getSessionMessageCount(session.id);
+      if (count <= 1) {
+        await db.updateSession(session.id, { title: text.slice(0, 40), updatedAt: Date.now() });
       }
 
-      await runGeneration(session.id, model);
+      await runGeneration(session.id, model, userMsg.id);
     } finally {
       generatingRef.current = false;
     }
@@ -314,22 +322,31 @@ export default function ChatScreen() {
     setSnack('Copied');
   }, []);
 
-  // Regenerate: replace the last reply without re-inserting the user message
+  // Regenerate: a new version of the last reply; the old one is kept.
   const handleRegenerate = useCallback(async () => {
     if (!session || messages.length === 0 || generatingRef.current) return;
     const model = modelCtx.loadedModel;
     if (!model) return;
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.role !== 'assistant') return;
+    if (lastMsg?.role !== 'assistant' || !lastMsg.parentId) return;
     generatingRef.current = true;
     try {
-      await db.deleteMessage(lastMsg.id);
-      await runGeneration(session.id, model);
+      await runGeneration(session.id, model, lastMsg.parentId);
     } finally {
       generatingRef.current = false;
     }
     refreshSessions();
   }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
+
+  // Show another version of a message (and the conversation that followed it).
+  const handleSwitchVersion = useCallback(async (msg: MessageRecord, delta: number) => {
+    if (!session || !msg.versions || generatingRef.current) return;
+    const id = msg.versions.ids[msg.versions.index + delta];
+    if (!id) return;
+    await db.selectMessage({ id, sessionId: session.id, parentId: msg.parentId ?? null });
+    setMessages(await db.getSessionMessages(session.id));
+    setEditMode(null);
+  }, [session]);
 
   // Model switch
   const handleModelSwitch = useCallback(async (model: ModelRecord) => {
@@ -445,9 +462,10 @@ export default function ChatScreen() {
         onCopy={handleCopy}
         onRegenerate={isLastAssistant ? handleRegenerate : undefined}
         onLongPress={() => setLongPressMsg(item)}
+        onSwitchVersion={!isStreaming && item.versions ? (delta) => handleSwitchVersion(item, delta) : undefined}
       />
     );
-  }, [isStreaming, stream, handleCopy, handleRegenerate, displayCount]);
+  }, [isStreaming, stream, handleCopy, handleRegenerate, handleSwitchVersion, displayCount]);
 
   const chatTopBar = (
     <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top }]}>

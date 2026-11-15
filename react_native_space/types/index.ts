@@ -23,6 +23,8 @@ export interface SessionRecord {
   modelId: string | null;
   systemPromptOverride: string | null;
   paramsOverride: string | null; // JSON ParamSet (overrides for this chat)
+  /** Which version of the first message is shown. */
+  rootMessageId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -41,6 +43,12 @@ export interface MessageRecord {
   reasoning?: string | null;
   /** How long the model thought, in ms. */
   thinkingMs?: number | null;
+  /** Message this one follows (null for the first message). */
+  parentId?: string | null;
+  /** Which version of the next message is shown. */
+  selectedChildId?: string | null;
+  /** Other versions of this message (computed when loading; not stored). */
+  versions?: { ids: string[]; index: number };
 }
 
 export interface PromptPreset {
