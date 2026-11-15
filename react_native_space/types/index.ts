@@ -37,6 +37,10 @@ export interface MessageRecord {
   tokensPerSec: number | null;
   stopped: number;
   createdAt: number;
+  /** Assistant thinking, kept apart from the answer (null if none). */
+  reasoning?: string | null;
+  /** How long the model thought, in ms. */
+  thinkingMs?: number | null;
 }
 
 export interface PromptPreset {

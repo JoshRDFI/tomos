@@ -37,6 +37,11 @@ const sections = [
     body: `Settings are layered; each level overrides the ones before it:\n\n1. App defaults\n2. Settings → Model settings for all chats\n3. Recommendations stored in the model file (read automatically)\n4. Settings → Settings per model (or Models → … → Settings)\n5. A chat's own settings (⚙ in the chat)\n\nUse "Add setting" to pick any llama.cpp option, or "Custom…" to type any llama.rn parameter name and value. "Paste flags" accepts a command from a model card, e.g. --temp 1.0 --top-p 0.95 --presence-penalty 1.0.\n\nSettings marked "reloads model" (context length, threads, GPU layers…) apply the next time the model loads; the app reloads it automatically before the next reply.`,
   },
   {
+    title: 'Thinking models',
+    icon: 'lightbulb-outline',
+    body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off, add the "Thinking" setting and switch it off (for one chat, a model, or all chats). Setting "Reasoning format" to None shows the raw output, tags included.`,
+  },
+  {
     title: 'Performance tips',
     icon: 'speedometer',
     body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,

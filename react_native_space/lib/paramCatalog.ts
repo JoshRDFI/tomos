@@ -85,9 +85,9 @@ export const PARAM_CATALOG: ParamDef[] = [
   // ── Thinking ──
   { key: 'enable_thinking', label: 'Thinking', group: 'Thinking', scope: 'completion', kind: 'bool', llamaDefault: true,
     help: 'Let reasoning models think before answering. Needs a model with a built-in chat template.' },
-  { key: 'reasoning_format', label: 'Reasoning format', group: 'Thinking', scope: 'completion', kind: 'select', llamaDefault: 'none',
+  { key: 'reasoning_format', label: 'Reasoning format', group: 'Thinking', scope: 'completion', kind: 'select', llamaDefault: 'auto',
     options: [{ value: 'none', label: 'None' }, { value: 'auto', label: 'Auto' }, { value: 'deepseek', label: 'DeepSeek' }],
-    help: 'How thinking is separated from the answer.' },
+    help: 'How thinking is separated from the answer. Auto shows it in a collapsible Thinking section; None shows the raw output, tags included.' },
   { key: 'thinking_budget_tokens', label: 'Thinking budget', group: 'Thinking', scope: 'completion', kind: 'int', min: -1, max: 32768, step: 256, llamaDefault: -1,
     help: 'Maximum tokens of thinking before it is forced to close. -1 is unlimited.' },
 

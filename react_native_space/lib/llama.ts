@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import type { ChatMessage, ModelRecord } from '@/types';
 import { loadSignature, type ParamSet } from './params';
 import { formatPrompt } from './templates';
+import { resolveStreamView, type StreamState, type StreamView } from './thinking';
 import { fitToContext } from './contextWindow';
 
 let _context: any = null;
@@ -72,13 +73,20 @@ export function stopGeneration() {
 }
 
 export interface GenerateResult {
+  /** The answer, without thinking. */
   content: string;
+  /** The model's thinking, separated from the answer ('' if none). */
+  reasoning: string;
+  /** Time from the first thinking token to the start of the answer. */
+  thinkingMs: number | null;
   tokenCount: number;
   tokensPerSec: number;
   stopped: boolean;
   /** Number of oldest history messages left out to fit the context window. */
   droppedMessages: number;
 }
+
+export type { StreamView } from './thinking';
 
 async function countTokens(text: string): Promise<number> {
   try {
@@ -95,7 +103,8 @@ export async function generate(
   messages: ChatMessage[],
   /** Per-completion llama.rn parameters (temperature, top_k, n_predict, ...). */
   params: ParamSet,
-  onToken: (token: string) => void,
+  /** Called as the reply streams in, with the thinking and answer so far. */
+  onUpdate: (view: StreamView) => void,
 ): Promise<GenerateResult> {
   if (!isNative || !_context) {
     throw new Error('Model not loaded');
@@ -123,14 +132,27 @@ export async function generate(
   // Everything the user configured passes straight through to llama.rn.
   const sampling = { ...params, n_predict: nPredict };
 
-  let shown = '';
+  // Thinking vs answer. With a jinja template llama.rn parses the output and
+  // reports reasoning_content/content on every token (only when non-empty);
+  // otherwise, or when it finds no thinking, split <think> tags ourselves.
+  // reasoning_format 'none' means: show the raw output, don't split.
+  const splitEnabled = params.reasoning_format !== 'none';
+  const st: StreamState = { raw: '', nativeThinking: null, nativeContent: null };
+  const view = () => resolveStreamView(st, splitEnabled);
+
+  let firstTokenAt: number | null = null;
+  let answerAt: number | null = null;
+  let last: StreamView = { thinking: '', answer: '', thinkingOpen: false };
   const onData = (data: any) => {
     if (stopRef.stop) return;
-    const tok = data?.token ?? '';
-    if (tok) {
-      shown += tok;
-      onToken(tok);
-    }
+    const now = Date.now();
+    if (firstTokenAt === null) firstTokenAt = now;
+    if (typeof data?.token === 'string') st.raw += data.token;
+    if (typeof data?.reasoning_content === 'string') st.nativeThinking = data.reasoning_content;
+    if (typeof data?.content === 'string') st.nativeContent = data.content;
+    last = view();
+    if (answerAt === null && last.answer.trim()) answerAt = now;
+    onUpdate(last);
   };
 
   let request: any;
@@ -140,6 +162,8 @@ export async function generate(
       messages: fitted.map((m) => ({ role: m.role, content: m.content })),
       jinja: true,
     };
+    // Ask llama.rn to separate thinking unless the user chose otherwise.
+    if (request.reasoning_format === undefined) request.reasoning_format = 'auto';
   } else {
     const effectiveKey = templateKey === 'auto' ? 'chatml' : templateKey;
     const { prompt, stop } = formatPrompt(effectiveKey, fitted);
@@ -156,10 +180,25 @@ export async function generate(
     _inflight = null;
   }
 
+  // When stopped, keep exactly what the user saw rather than the full native
+  // result, which can include tokens produced after the stop request.
+  let final = last;
+  if (!stopRef.stop && result) {
+    if (typeof result.reasoning_content === 'string' && result.reasoning_content) st.nativeThinking = result.reasoning_content;
+    if (typeof result.content === 'string' && (result.content || st.nativeContent !== null)) st.nativeContent = result.content;
+    if (st.nativeThinking === null && st.nativeContent === null && typeof result.text === 'string') st.raw = result.text;
+    const v = view();
+    // Never lose text that was already on screen.
+    final = v.answer.trim() || !last.answer.trim() ? v : last;
+  }
+  const thinkingMs = final.thinking && firstTokenAt !== null
+    ? (answerAt ?? Date.now()) - firstTokenAt
+    : null;
+
   return {
-    // When stopped, keep exactly what the user saw rather than the full native
-    // result, which can include tokens produced after the stop request.
-    content: stopRef.stop ? shown : (result?.text ?? shown),
+    content: final.answer.trim(),
+    reasoning: final.thinking,
+    thinkingMs,
     tokenCount: result?.timings?.predicted_n ?? 0,
     tokensPerSec: result?.timings?.predicted_per_second ?? 0,
     stopped: stopRef.stop,

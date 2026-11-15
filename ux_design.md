@@ -86,7 +86,9 @@ No tabs and no `(group)` folders. The drawer is a component inside `index.tsx`, 
 - id TEXT PK
 - sessionId TEXT, FK sessions ON DELETE CASCADE, indexed
 - role TEXT: 'user' | 'assistant'
-- content TEXT
+- content TEXT (the answer only)
+- reasoning TEXT NULL: the model's thinking, kept apart from the answer
+- thinkingMs INTEGER NULL: time from the first thinking token to the start of the answer
 - modelName TEXT NULL
 - tokenCount INTEGER NULL
 - tokensPerSec REAL NULL
@@ -162,6 +164,7 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 
 **Context and model changes**
 - Before each reply, `prepareModel(model, session)` re-reads the model and session, reads the file's recommended settings once if needed, and resolves the layers. If the load-settings signature differs from the loaded context, or the session's model differs from `loadedModelId`, the model reloads first (loading banner shown).
+- **Thinking** is separated from the answer while streaming. With a jinja template, `reasoning_format` defaults to `auto` and llama.rn reports `reasoning_content` / `content` on every token; otherwise (manual templates, unrecognised formats, or no thinking found) `lib/thinking.ts` splits a leading `<think>…</think>` / `<thinking>` / `[THINK]` block, including blocks opened by the template (only the closing tag in the output). `reasoning_format: none` shows the raw output.
 - **Stop** calls `stopCompletion()` immediately. A stopped reply is saved with `stopped = 1`; an empty stopped reply is not saved.
 - `activateKeepAwakeAsync('gen')` runs when generation starts; `deactivateKeepAwake('gen')` runs on finish, stop or error.
 - On app start, if `lastModelId` exists, auto-load it in the background.
@@ -190,7 +193,11 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 - Assistant message:
   - Left-aligned and full width, `assistantBubble` colour, radius 18 with a 6 top-left corner.
   - Rendered by the built-in renderer: fenced code blocks, **bold** and `inline code`. Headings, lists and tables are **(planned)** with full markdown and throttled streaming updates.
-  - Thinking text currently appears inline in the reply; a separate collapsible thinking section is **(planned)**.
+  - **Thinking** (reasoning models): a collapsible section above the answer, with a 2dp brand left rule, a `lightbulb-outline` icon and a secondary-colour label.
+    - While the model thinks: "Thinking… 12 s" (live timer), expanded, streaming text in secondary colour, 14/21, with the block cursor. Only the last ~1500 characters are drawn while streaming.
+    - Once the answer starts it collapses to "Thought for 12 s"; tapping toggles it. Saved replies show it collapsed.
+    - Copy, text export, search and the history sent back to the model use the answer only. Markdown export puts the thinking in a `<details>` block.
+    - Replies saved before this feature that contain `<think>` tags are split the same way when displayed.
   - Fenced code blocks: `codeBg` panel, JetBrains Mono 13, horizontal scroll, header row with the language label and a "Copy" text button.
 - Footer row under each assistant message (caption mono, secondary colour):
   - `412 tok · 18.3 tok/s`, plus `· stopped` when stopped.
@@ -483,7 +490,7 @@ No gradients and no glass effects.
 <roadmap>
 In order (tracked in Archon):
 1. ~~Layered llama.cpp settings, per-model settings, About & licenses~~ (done, `feature/model-settings`)
-2. Separate thinking display: a collapsible "Thinking" section above the answer, using llama.rn's `reasoning_format` / `reasoning_content`, with the saved message matching what was streamed.
+2. ~~Separate thinking display~~ (done, `feature/thinking-display`)
 3. Full markdown rendering (headings, lists, tables, links) with throttled streaming updates.
 4. Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages.
 5. Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix.

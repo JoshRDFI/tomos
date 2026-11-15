@@ -76,6 +76,8 @@
     }
   },
   "jest": {
-    "preset": "jest-expo"
+    "preset": "jest-expo",
+    "modulePathIgnorePatterns": ["<rootDir>/android/", "<rootDir>/ios/", "<rootDir>/dist/"],
+    "testPathIgnorePatterns": ["/node_modules/", "<rootDir>/android/", "<rootDir>/ios/"]
   }
 }

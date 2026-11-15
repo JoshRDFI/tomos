@@ -97,6 +97,9 @@ async function createTables() {
   const modelCols = ((await db.getAllAsync('PRAGMA table_info(models)')) as { name: string }[]).map((c) => c.name);
   if (!modelCols.includes('fileParams')) await db.execAsync('ALTER TABLE models ADD COLUMN fileParams TEXT');
   if (!modelCols.includes('paramsOverride')) await db.execAsync('ALTER TABLE models ADD COLUMN paramsOverride TEXT');
+  const msgCols = ((await db.getAllAsync('PRAGMA table_info(messages)')) as { name: string }[]).map((c) => c.name);
+  if (!msgCols.includes('reasoning')) await db.execAsync('ALTER TABLE messages ADD COLUMN reasoning TEXT');
+  if (!msgCols.includes('thinkingMs')) await db.execAsync('ALTER TABLE messages ADD COLUMN thinkingMs INTEGER');
 
   // FTS triggers
   await db.execAsync(`
@@ -268,8 +271,8 @@ export async function insertMessage(m: MessageRecord): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.runAsync(
-    'INSERT INTO messages (id, sessionId, role, content, modelName, tokenCount, tokensPerSec, stopped, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [m.id, m.sessionId, m.role, m.content, m.modelName, m.tokenCount, m.tokensPerSec, m.stopped, m.createdAt]
+    'INSERT INTO messages (id, sessionId, role, content, modelName, tokenCount, tokensPerSec, stopped, createdAt, reasoning, thinkingMs) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [m.id, m.sessionId, m.role, m.content, m.modelName, m.tokenCount, m.tokensPerSec, m.stopped, m.createdAt, m.reasoning ?? null, m.thinkingMs ?? null]
   );
 }
 

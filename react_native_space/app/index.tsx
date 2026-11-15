@@ -13,12 +13,15 @@ import * as db from '@/lib/db';
 import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
 import { loadSignature } from '@/lib/params';
+import { splitThinking } from '@/lib/thinking';
 import type { SessionRecord, MessageRecord, ModelRecord } from '@/types';
 import MessageBubble from '@/components/chat/MessageBubble';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
+
+const EMPTY_STREAM: llama.StreamView = { thinking: '', answer: '', thinkingOpen: false };
 
 export default function ChatScreen() {
   const theme = useTheme<AppTheme>();
@@ -37,7 +40,7 @@ export default function ChatScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [snack, setSnack] = useState('');
-  const [streamingText, setStreamingText] = useState('');
+  const [stream, setStream] = useState<llama.StreamView>(EMPTY_STREAM);
   const [isStreaming, setIsStreaming] = useState(false);
   const [editMode, setEditMode] = useState<{ messageId: string; text: string } | null>(null);
   const [renameDialog, setRenameDialog] = useState<SessionRecord | null>(null);
@@ -188,7 +191,7 @@ export default function ChatScreen() {
 
     // Generate
     setIsStreaming(true);
-    setStreamingText('');
+    setStream(EMPTY_STREAM);
     modelCtx.setGenerating(true);
 
     // Keep awake
@@ -201,21 +204,22 @@ export default function ChatScreen() {
       const systemPrompt = await db.getEffectiveSystemPrompt(fresh);
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
-        ...currentMsgs.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content ?? '' })),
+        // Thinking isn't sent back to the model, only answers. Replies saved
+        // before thinking was split out still carry their tags; strip them.
+        ...currentMsgs.map((m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: m.role === 'assistant' && !m.reasoning ? splitThinking(m.content ?? '').answer : (m.content ?? ''),
+        })),
       ];
 
-      let accumulated = '';
-      const result = await llama.generate(model, chatMessages, completion, (token) => {
-        accumulated += token;
-        setStreamingText(accumulated);
-      });
+      const result = await llama.generate(model, chatMessages, completion, setStream);
 
       if (result.droppedMessages > 0) {
         setSnack(`Conversation is longer than the context window; the oldest ${result.droppedMessages} message${result.droppedMessages === 1 ? ' was' : 's were'} left out.`);
       }
 
       // Save assistant message (skip if stopped before anything was produced)
-      if (result.content.length > 0 || !result.stopped) {
+      if (result.content.length > 0 || result.reasoning.length > 0 || !result.stopped) {
         const asstMsg: MessageRecord = {
           id: db.generateId(),
           sessionId,
@@ -226,6 +230,8 @@ export default function ChatScreen() {
           tokensPerSec: result.tokensPerSec,
           stopped: result.stopped ? 1 : 0,
           createdAt: Date.now(),
+          reasoning: result.reasoning || null,
+          thinkingMs: result.thinkingMs,
         };
         await db.insertMessage(asstMsg);
       }
@@ -238,7 +244,7 @@ export default function ChatScreen() {
       setSnack('Generation failed: ' + String((e as any)?.message ?? e));
     } finally {
       setIsStreaming(false);
-      setStreamingText('');
+      setStream(EMPTY_STREAM);
       modelCtx.setGenerating(false);
       try {
         const KA = await import('expo-keep-awake');
@@ -375,7 +381,9 @@ export default function ChatScreen() {
       let content = `${s.title}\n\n`;
       for (const m of msgs) {
         if (format === 'md') {
-          content += `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n${m.content}\n\n`;
+          content += `**${m.role === 'user' ? 'You' : 'Assistant'}:**\n`;
+          if (m.reasoning) content += `<details><summary>Thinking</summary>\n\n${m.reasoning}\n\n</details>\n\n`;
+          content += `${m.content}\n\n`;
         } else {
           content += `${m.role === 'user' ? 'You' : 'Assistant'}:\n${m.content}\n\n`;
         }
@@ -433,13 +441,13 @@ export default function ChatScreen() {
         message={item}
         isLast={isLastAssistant}
         isStreaming={streaming}
-        streamingText={streaming ? streamingText : undefined}
+        stream={streaming ? stream : undefined}
         onCopy={handleCopy}
         onRegenerate={isLastAssistant ? handleRegenerate : undefined}
         onLongPress={() => setLongPressMsg(item)}
       />
     );
-  }, [isStreaming, streamingText, handleCopy, handleRegenerate, displayCount]);
+  }, [isStreaming, stream, handleCopy, handleRegenerate, displayCount]);
 
   const chatTopBar = (
     <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top }]}>
@@ -587,7 +595,7 @@ export default function ChatScreen() {
         {/* Long press menu */}
         <Dialog visible={!!longPressMsg} onDismiss={() => setLongPressMsg(null)}>
           <Dialog.Content style={{ gap: 4 }}>
-            <Button icon="content-copy" onPress={() => { handleCopy(longPressMsg?.content ?? ''); setLongPressMsg(null); }}>Copy</Button>
+            <Button icon="content-copy" onPress={() => { handleCopy(longPressMsg?.role === 'assistant' && !longPressMsg.reasoning ? splitThinking(longPressMsg.content ?? '').answer : (longPressMsg?.content ?? '')); setLongPressMsg(null); }}>Copy</Button>
             {longPressMsg?.role === 'user' && (
               <Button icon="pencil" onPress={handleEditResend}>Edit & resend</Button>
             )}

@@ -1,9 +1,76 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Pressable, ScrollView, Platform } from 'react-native';
-import { Text, IconButton, useTheme } from 'react-native-paper';
+import { Text, IconButton, useTheme, Icon } from 'react-native-paper';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, typeScale, fontFamilies } from '@/constants/theme';
 import type { MessageRecord } from '@/types';
+import type { StreamView } from '@/lib/llama';
+import { splitThinking, formatThinkingTime } from '@/lib/thinking';
+
+// While streaming, only the end of a long thought is drawn (it re-renders on
+// every token); the full text is shown once the reply is complete.
+const LIVE_TAIL = 1500;
+
+interface ThinkingProps {
+  text: string;
+  /** The model is still thinking. */
+  active: boolean;
+  /** Reply is still streaming (thinking may be done). */
+  streaming: boolean;
+  ms: number | null | undefined;
+}
+
+function ThinkingBlock({ text, active, streaming, ms }: ThinkingProps) {
+  const theme = useTheme<AppTheme>();
+  const c = theme.appColors;
+  // Open while thinking, closed once the answer starts, unless the user chose.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const open = userOpen ?? active;
+
+  // Live timer while thinking.
+  const startRef = useRef<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    if (startRef.current === null) startRef.current = Date.now();
+    const id = setInterval(() => setElapsed(Date.now() - (startRef.current ?? Date.now())), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+
+  const label = active
+    ? `Thinking… ${elapsed >= 1000 ? formatThinkingTime(elapsed) : ''}`.trim()
+    : ms ? `Thought for ${formatThinkingTime(ms)}` : 'Thinking';
+  const shown = streaming && text.length > LIVE_TAIL ? '…' + text.slice(-LIVE_TAIL) : text;
+
+  return (
+    <View style={[thinkStyles.container, { borderLeftColor: c.brand }]}>
+      <Pressable
+        onPress={() => setUserOpen(!open)}
+        style={thinkStyles.header}
+        hitSlop={6}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${label}. ${open ? 'Hide' : 'Show'} thinking`}
+      >
+        <Icon source="lightbulb-outline" size={16} color={c.textSecondary} />
+        <Text style={[thinkStyles.label, { color: c.textSecondary, fontFamily: fontFamilies.interMedium }]}>{label}</Text>
+        <Icon source={open ? 'chevron-up' : 'chevron-down'} size={16} color={c.textSecondary} />
+      </Pressable>
+      {open && (
+        <Text style={[thinkStyles.text, { color: c.textSecondary, fontFamily: fontFamilies.inter }]} selectable>
+          {shown}{active ? ' █' : ''}
+        </Text>
+      )}
+    </View>
+  );
+}
+
+const thinkStyles = StyleSheet.create({
+  container: { borderLeftWidth: 2, paddingLeft: 10, marginBottom: 8 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 },
+  label: { fontSize: 13, lineHeight: 18 },
+  text: { fontSize: 14, lineHeight: 21, marginTop: 4 },
+});
 
 interface CodeBlockProps {
   language: string;
@@ -41,7 +108,8 @@ interface Props {
   message: MessageRecord;
   isLast: boolean;
   isStreaming: boolean;
-  streamingText?: string;
+  /** Thinking and answer so far, while this reply streams. */
+  stream?: StreamView;
   onCopy: (text: string) => void;
   onRegenerate?: () => void;
   onLongPress?: () => void;
@@ -99,11 +167,21 @@ function renderInlineMarkdown(text: string, c: any): React.ReactNode[] {
   return parts;
 }
 
-export default React.memo(function MessageBubble({ message, isLast, isStreaming, streamingText, onCopy, onRegenerate, onLongPress }: Props) {
+export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onLongPress }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const isUser = message.role === 'user';
-  const displayText = isStreaming ? (streamingText ?? '') : (message.content ?? '');
+
+  // Thinking and answer. Replies saved before thinking was stored separately
+  // may still have it inline in <think> tags; split those for display.
+  const { thinking, answer } = useMemo(() => {
+    if (isStreaming) return { thinking: stream?.thinking ?? '', answer: stream?.answer ?? '' };
+    if (isUser || message.reasoning) return { thinking: message.reasoning ?? '', answer: message.content ?? '' };
+    const s = splitThinking(message.content ?? '');
+    return { thinking: s.thinking, answer: s.answer };
+  }, [isStreaming, stream, isUser, message.reasoning, message.content]);
+  const displayText = answer;
+  const thinkingActive = isStreaming && !!stream?.thinkingOpen;
 
   const bubbleStyle = useMemo(() => ([
     styles.bubble,
@@ -128,10 +206,16 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
             {displayText}
           </Text>
         ) : (
-          <View>{renderContent(displayText + (isStreaming ? ' █' : ''), onCopy, c)}</View>
+          <View>
+            {(thinking.length > 0 || thinkingActive) && (
+              <ThinkingBlock text={thinking} active={thinkingActive} streaming={isStreaming} ms={message.thinkingMs} />
+            )}
+            {(displayText.length > 0 || (isStreaming && !thinkingActive)) &&
+              renderContent(displayText + (isStreaming ? ' █' : ''), onCopy, c)}
+          </View>
         )}
       </View>
-      {!isUser && !isStreaming && message.content?.length > 0 && (
+      {!isUser && !isStreaming && (answer.length > 0 || thinking.length > 0) && (
         <View style={styles.footer}>
           {(message.tokenCount ?? 0) > 0 && (
             <Text style={[styles.stats, { color: c.textSecondary, fontFamily: fontFamilies.mono }]}>
@@ -139,7 +223,7 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
               {message.stopped ? ' · stopped' : ''}
             </Text>
           )}
-          <IconButton icon="content-copy" size={16} iconColor={c.textSecondary} onPress={() => onCopy(message.content ?? '')} accessibilityLabel="Copy message" style={styles.footerBtn} />
+          <IconButton icon="content-copy" size={16} iconColor={c.textSecondary} onPress={() => onCopy(answer)} accessibilityLabel="Copy message" style={styles.footerBtn} />
           {isLast && onRegenerate && (
             <IconButton icon="refresh" size={16} iconColor={c.textSecondary} onPress={onRegenerate} accessibilityLabel="Regenerate response" style={styles.footerBtn} />
           )}

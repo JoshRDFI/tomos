@@ -50,6 +50,7 @@ react_native_space/
     templates.ts          manual chat templates + stop strings
     gguf.ts               quant/size parsing from file names
     fts.ts                buildFtsQuery(): safe FTS5 MATCH strings
+    thinking.ts           splitThinking(): separate <think> blocks from the answer
   constants/theme.ts      tokens, type scale, spacing, radii (no inline hex elsewhere)
   constants/licenses.json generated; see "Licenses"
   scripts/generate-licenses.mjs
@@ -102,8 +103,9 @@ To add a known setting, add an entry to `lib/paramCatalog.ts` (and a flag alias 
    - Runs `fitToContext` to drop the oldest turns. The system prompt and latest message are always kept, and kept history never starts on an assistant turn.
    - Uses jinja with the file's template when the template is "auto" and the file has one; otherwise formats with `lib/templates.ts`.
    - Merges user `stop` strings with the template's.
+   - Separates thinking from the answer as it streams: llama.rn's `reasoning_content` with jinja (`reasoning_format` defaults to `auto`), else `splitThinking()` on `<think>` tags.
    - Streams tokens to the UI.
-5. Save the reply with token count and speed. A stopped reply is marked `stopped`; an empty stopped reply is discarded.
+5. Save the reply with token count and speed. The answer goes in `content` and the thinking in `reasoning` (with `thinkingMs`); only answers are sent back to the model in later turns. A stopped reply is marked `stopped`; an empty stopped reply is discarded.
 
 `stopGeneration()` calls `stopCompletion()` immediately. `releaseModel()` stops and awaits any in-flight completion before releasing the context, so a model switch or unload never frees memory under a running completion.
 
