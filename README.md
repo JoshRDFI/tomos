@@ -5,6 +5,7 @@ Run language models on your Android phone, fully offline. LLM Chat loads GGUF mo
 ## Features
 
 - **Any GGUF model.** Import a `.gguf` file; the app copies it into its own storage and reads its metadata, chat template and recommended settings.
+  - The import is a copy, not a move. Once the model appears in the app, delete the original (for example from Downloads) to free the space; the app doesn't need it.
 - **Full llama.cpp settings.** Sampling, repetition penalties, thinking, context length, threads, GPU layers, KV cache type, and any other llama.rn option, set at four levels:
   - all chats
   - the model file's own recommendations (read automatically)
