@@ -24,7 +24,7 @@ const sections = [
   {
     title: 'Copying files to the phone',
     icon: 'usb',
-    body: `Options:\n• USB cable to the Downloads folder (use File Transfer mode)\n• Android Files app\n• Download directly on the phone in a browser\n\nThen use Models → Add GGUF model. The app copies the file into its own storage, so you can delete the original afterwards to save space.`,
+    body: `Options:\n• USB cable to the Downloads folder (use File Transfer mode)\n• Android Files app\n• Download directly on the phone in a browser\n\nThen use Models → Add GGUF model.\n\nImporting copies the file into the app's own storage; it doesn't move it. Once the model appears in the Models list, delete the original (for example from Downloads) to free the space. The app doesn't need it, and models are several GB each.`,
   },
   {
     title: 'Chat templates',
