@@ -33,7 +33,7 @@ export async function loadModel(model: ModelRecord, loadParams: ParamSet): Promi
 export async function releaseModel(): Promise<void> {
   if (_context) {
     if (_inflight) {
-      try { await _context.stopCompletion(); } catch {}
+      interrupt(_context);
       try { await _inflight; } catch {}
     }
     try { await _context.release(); } catch {}
@@ -68,9 +68,17 @@ export function stopGeneration() {
   _stopRef.stop = true;
   // Actually interrupt native generation; the completion promise then resolves
   // promptly with what was produced so far.
-  if (_context && _inflight) {
-    _context.stopCompletion().catch(() => {});
-  }
+  if (_context && _inflight) interrupt(_context);
+}
+
+/**
+ * Ask llama.rn to stop the running completion. Its JSI stopCompletion returns
+ * undefined, not the Promise its types promise, so never chain on the result.
+ */
+function interrupt(ctx: any) {
+  try {
+    void Promise.resolve(ctx.stopCompletion()).catch(() => {});
+  } catch {}
 }
 
 export interface GenerateResult {
