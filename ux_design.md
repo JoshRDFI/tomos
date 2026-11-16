@@ -153,7 +153,8 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 - Auto with no embedded template falls back to ChatML and shows a one-time snackbar: "No template in file — using ChatML. Change it in Model Manager."
 
 **Messages and sampling**
-- The messages sent are `[system (effective system prompt, omitted if empty), ...session messages]`.
+- The messages sent are `[system (effective system prompt, plus today's date when that setting is on; omitted if empty), ...the visible path up to the message being answered]`.
+- **Continue** (footer `play-outline` button and long-press "Continue", on the last reply when it was stopped or cut off): the chat is formatted up to the assistant turn (jinja via `getFormattedChat` with the generation prompt, or the manual template), then the partial reply is appended verbatim (`lib/continuation.ts`: thinking re-opened with the model's own tags if it was cut off mid-thought) and completed as a raw prompt with the template's stop strings. The new text is added to the same message; token count adds up, speed is the new run's. Footer shows `· stopped` (user) or `· cut off` (hit `n_predict` or a full context).
 - All resolved completion settings are passed through to `completion()` unchanged, so any llama.rn option works (including `chat_template_kwargs`-style options such as `enable_thinking`).
 - User `stop` strings are merged with the template's stop strings.
 - `n_predict` is capped at half the loaded context; `n_predict ≤ 0` means "half the context".
@@ -337,8 +338,12 @@ Reached from the drawer's "Settings" row. One scrolling page:
 - **System prompt:** "Used by every chat unless the chat sets its own."
   - Multiline TextInput.
   - Buttons "Load preset" (menu) and "Manage presets" → push Presets.
+  - Switch row "Tell the model today's date" (default on), caption showing the sentence added: "Today is Sunday, November 15, 2026." (`lib/dateContext.ts`, local time, appended to the effective system prompt of every chat at send time; setting key `includeDate`).
 - **Model settings for all chats:** a `ParamEditor` for the global layer (inherits only app defaults). Debounced save, flushed on leave.
 - **Settings per model:** one row per library model with a summary ("3 from model file · 2 customized" or "Using settings for all chats") → push Model settings. With no models, an "Add a model" button.
+- **Backup:** "All chats (with every version), presets and settings, as one JSON file…".
+  - "Back up" writes `llmchat-backup-YYYY-MM-DD.json` (`lib/backup.ts`, format `llmchat-backup` v1) and opens the share sheet (save to Files/Drive, send, …).
+  - "Restore…" picks a file, validates it (snackbar with the reason if it isn't a backup, is from a newer app version, or is damaged), then asks "Replace everything with this backup?" with "N chats, M messages, from DATE". Replace runs in one transaction: chats, messages, presets and settings are replaced; `lastModelId` stays; model files and the model list stay, and models matching a backup entry by file name and size get its name, template and settings; chats on other models keep no model. Disabled while a reply is generating.
 - **About & licenses** row → push About.
 
 ### 5a. Model settings (app/settings/model.tsx?modelId=)
@@ -503,5 +508,5 @@ In order (tracked in Archon):
 3. ~~Full markdown rendering (headings, lists, tables, links) with throttled streaming updates~~ (done, `feature/markdown`)
 4. ~~Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages~~ (done, `feature/branching`)
 5. ~~Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix~~ (done, `feature/gguf-check`)
-6. Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata.
+6. ~~Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata~~ (done, `feature/continue-date-backup`)
 </roadmap>

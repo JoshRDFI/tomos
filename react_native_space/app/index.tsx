@@ -14,6 +14,7 @@ import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
 import { loadSignature } from '@/lib/params';
 import { splitThinking } from '@/lib/thinking';
+import { withDate } from '@/lib/dateContext';
 import type { SessionRecord, MessageRecord, ModelRecord } from '@/types';
 import MessageBubble from '@/components/chat/MessageBubble';
 import ChatInput from '@/components/chat/ChatInput';
@@ -118,8 +119,13 @@ export default function ChatScreen() {
         const currentId = sessionIdRef.current;
         if (!currentId) return; // initial load not finished yet
         const targetId = (await db.getSetting('lastSessionId')) ?? currentId;
-        const target = (await db.getSession(targetId)) ?? (await db.getSession(currentId));
-        if (cancelled || !target) return;
+        let target = (await db.getSession(targetId)) ?? (await db.getSession(currentId));
+        if (!target) {
+          // Both gone (e.g. a backup was restored): newest chat, or a new one.
+          target = (await db.getAllSessions())[0] ?? (await db.createSession(modelCtx.loadedModelId));
+          db.setSetting('lastSessionId', target.id).catch(() => {});
+        }
+        if (cancelled) return;
         setSession(target);
         // Reload messages too: a search hit may have selected another branch.
         // Not while generating, which shows the history being replied to.
@@ -131,7 +137,7 @@ export default function ChatScreen() {
         refreshSessions();
       })().catch((e) => console.warn('Focus refresh error', e));
       return () => { cancelled = true; };
-    }, [isWeb, refreshSessions]),
+    }, [isWeb, refreshSessions, modelCtx.loadedModelId]),
   );
 
   // Drawer back handler
@@ -173,8 +179,9 @@ export default function ChatScreen() {
 
 
   // Generate a reply to `parentId` (a user message) from the conversation
-  // leading up to it. The reply is added as a new version under that message.
-  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord, parentId: string) => {
+  // leading up to it. The reply is added as a new version under that message,
+  // or, with `cont`, appended to that stopped or cut-off reply.
+  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord, parentId: string, cont?: MessageRecord) => {
     // Re-read the session so edits made on the chat-settings screen apply.
     const fresh = await db.getSession(sessionId);
     if (!fresh) return;
@@ -195,8 +202,17 @@ export default function ChatScreen() {
     }
 
     // Generate
+    // A continuation is the old reply (thinking split out, also for replies
+    // saved before thinking was stored separately) plus what comes next.
+    const partial = cont
+      ? (cont.reasoning
+        ? { content: cont.content ?? '', reasoning: cont.reasoning }
+        : (() => { const t = splitThinking(cont.content ?? ''); return { content: t.answer, reasoning: t.thinking }; })())
+      : undefined;
     setIsStreaming(true);
-    setStream(EMPTY_STREAM);
+    setStream(partial
+      ? { thinking: partial.reasoning, answer: partial.content, thinkingOpen: !partial.content && !!partial.reasoning }
+      : EMPTY_STREAM);
     modelCtx.setGenerating(true);
 
     // Keep awake
@@ -206,7 +222,8 @@ export default function ChatScreen() {
     } catch {}
 
     try {
-      const systemPrompt = await db.getEffectiveSystemPrompt(fresh);
+      let systemPrompt = await db.getEffectiveSystemPrompt(fresh);
+      if ((await db.getSetting('includeDate')) !== '0') systemPrompt = withDate(systemPrompt, new Date());
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
         // Thinking isn't sent back to the model, only answers. Replies saved
@@ -217,14 +234,26 @@ export default function ChatScreen() {
         })),
       ];
 
-      const result = await llama.generate(model, chatMessages, completion, setStream);
+      const result = await llama.generate(model, chatMessages, completion, setStream, partial);
 
       if (result.droppedMessages > 0) {
         setSnack(`Conversation is longer than the context window; the oldest ${result.droppedMessages} message${result.droppedMessages === 1 ? ' was' : 's were'} left out.`);
       }
 
-      // Save assistant message (skip if stopped before anything was produced)
-      if (result.content.length > 0 || result.reasoning.length > 0 || !result.stopped) {
+      // 1 = stopped by the user, 2 = cut off by the length limit.
+      const stopped = result.stopped ? 1 : result.cutOff ? 2 : 0;
+      if (cont && partial) {
+        await db.updateMessage(cont.id, {
+          content: result.content,
+          reasoning: result.reasoning || null,
+          tokenCount: (cont.tokenCount ?? 0) + result.tokenCount,
+          tokensPerSec: result.tokensPerSec || cont.tokensPerSec,
+          stopped,
+          // Thinking time grows only if the thinking itself was continued.
+          thinkingMs: partial.content ? (cont.thinkingMs ?? null) : ((cont.thinkingMs ?? 0) + (result.thinkingMs ?? 0)) || null,
+        });
+      } else if (result.content.length > 0 || result.reasoning.length > 0 || !result.stopped) {
+        // Save the reply (skipped if stopped before anything was produced)
         const asstMsg: MessageRecord = {
           id: db.generateId(),
           sessionId,
@@ -233,7 +262,7 @@ export default function ChatScreen() {
           modelName: model.displayName,
           tokenCount: result.tokenCount,
           tokensPerSec: result.tokensPerSec,
-          stopped: result.stopped ? 1 : 0,
+          stopped,
           createdAt: Date.now(),
           reasoning: result.reasoning || null,
           thinkingMs: result.thinkingMs,
@@ -332,6 +361,22 @@ export default function ChatScreen() {
     generatingRef.current = true;
     try {
       await runGeneration(session.id, model, lastMsg.parentId);
+    } finally {
+      generatingRef.current = false;
+    }
+    refreshSessions();
+  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
+
+  // Continue the last reply where it stopped or was cut off.
+  const handleContinue = useCallback(async () => {
+    if (!session || messages.length === 0 || generatingRef.current) return;
+    const model = modelCtx.loadedModel;
+    if (!model) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.role !== 'assistant' || !lastMsg.parentId || !lastMsg.stopped) return;
+    generatingRef.current = true;
+    try {
+      await runGeneration(session.id, model, lastMsg.parentId, lastMsg);
     } finally {
       generatingRef.current = false;
     }
@@ -461,11 +506,12 @@ export default function ChatScreen() {
         stream={streaming ? stream : undefined}
         onCopy={handleCopy}
         onRegenerate={isLastAssistant ? handleRegenerate : undefined}
+        onContinue={isLastAssistant && !!item.stopped ? handleContinue : undefined}
         onLongPress={() => setLongPressMsg(item)}
         onSwitchVersion={!isStreaming && item.versions ? (delta) => handleSwitchVersion(item, delta) : undefined}
       />
     );
-  }, [isStreaming, stream, handleCopy, handleRegenerate, handleSwitchVersion, displayCount]);
+  }, [isStreaming, stream, handleCopy, handleRegenerate, handleContinue, handleSwitchVersion, displayCount]);
 
   const chatTopBar = (
     <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top }]}>
@@ -619,6 +665,9 @@ export default function ChatScreen() {
             )}
             {longPressMsg?.role === 'assistant' && longPressMsg?.id === messages?.[messages.length - 1]?.id && (
               <Button icon="refresh" onPress={() => { setLongPressMsg(null); handleRegenerate(); }}>Regenerate</Button>
+            )}
+            {longPressMsg?.role === 'assistant' && !!longPressMsg.stopped && longPressMsg?.id === messages?.[messages.length - 1]?.id && (
+              <Button icon="play-outline" onPress={() => { setLongPressMsg(null); handleContinue(); }}>Continue</Button>
             )}
           </Dialog.Content>
         </Dialog>

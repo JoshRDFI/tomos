@@ -81,6 +81,8 @@ interface Props {
   stream?: StreamView;
   onCopy: (text: string) => void;
   onRegenerate?: () => void;
+  /** Continue this stopped or cut-off reply. */
+  onContinue?: () => void;
   onLongPress?: () => void;
   /** Show the previous (-1) or next (+1) version of this message. */
   onSwitchVersion?: (delta: number) => void;
@@ -101,7 +103,7 @@ function VersionSwitcher({ index, count, onSwitch }: { index: number; count: num
   );
 }
 
-export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onLongPress, onSwitchVersion }: Props) {
+export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onContinue, onLongPress, onSwitchVersion }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const isUser = message.role === 'user';
@@ -162,10 +164,13 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
           {(message.tokenCount ?? 0) > 0 && (
             <Text style={[styles.stats, { color: c.textSecondary, fontFamily: fontFamilies.mono }]}>
               {message.tokenCount} tok · {(message.tokensPerSec ?? 0)?.toFixed?.(1)} tok/s
-              {message.stopped ? ' · stopped' : ''}
+              {message.stopped === 2 ? ' · cut off' : message.stopped ? ' · stopped' : ''}
             </Text>
           )}
           <IconButton icon="content-copy" size={16} iconColor={c.textSecondary} onPress={() => onCopy(answer)} accessibilityLabel="Copy message" style={styles.footerBtn} />
+          {isLast && onContinue && (
+            <IconButton icon="play-outline" size={16} iconColor={c.textSecondary} onPress={onContinue} accessibilityLabel="Continue response" style={styles.footerBtn} />
+          )}
           {isLast && onRegenerate && (
             <IconButton icon="refresh" size={16} iconColor={c.textSecondary} onPress={onRegenerate} accessibilityLabel="Regenerate response" style={styles.footerBtn} />
           )}

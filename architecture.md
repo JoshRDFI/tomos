@@ -48,6 +48,9 @@ react_native_space/
     modelMeta.ts          GGUF recommended settings; prepareModel() for each reply
     contextWindow.ts      fitToContext(): drop oldest turns to fit n_ctx
     branches.ts           visiblePath(), pathTo(), versionsOf(): message versions
+    continuation.ts       buildContinuation(): prompt suffix + display prefix for Continue
+    dateContext.ts        withDate(): today's date in the system prompt
+    backup.ts             backup file format, validation, model matching (DB side in db.ts)
     templates.ts          manual chat templates + stop strings
     gguf.ts               quant/size parsing from file names
     ggufHeader.ts         GGUF header reader; checkCompatibility() against the bundled ggml types
@@ -65,11 +68,13 @@ react_native_space/
 
 All state is in SQLite, opened through `lib/sqliteLoader`. Tables:
 
-- `settings`: key/value JSON (`themeMode`, `defaultSystemPrompt`, `globalParams`, `lastSessionId`, `lastModelId`)
+- `settings`: key/value JSON (`themeMode`, `defaultSystemPrompt`, `includeDate`, `globalParams`, `lastSessionId`, `lastModelId`)
 - `models`: the library, including `fileParams` (recommended settings read from the GGUF) and `paramsOverride` (this model's settings)
 - `sessions`: chats, including `systemPromptOverride` and `paramsOverride` (this chat's settings)
 - `messages`, with `messages_fts` (FTS5) kept in sync by triggers. Messages form a tree (`lib/branches.ts`): `parentId` links each message to the one it follows, and the parent's `selectedChildId` (or `sessions.rootMessageId` for first messages) picks the version shown. `getSessionMessages()` returns the visible path with `versions` on messages that have siblings. Edit and regenerate insert a sibling; nothing is deleted. Chats from before branching were linked into a single branch by a one-time migration.
 - `prompt_presets`
+
+Backups (`Settings → Backup`) are a JSON dump of every table except model files; restore replaces chats, presets and settings in one transaction and inserts only columns the current schema has, so older backups restore into newer schemas.
 
 Migrations are additive and run at startup in `lib/db.ts` (`PRAGMA table_info` then `ALTER TABLE ADD COLUMN`); `getDb()` resolves only after they finish. Never rewrite or drop existing columns; installed copies carry old data.
 
@@ -109,7 +114,9 @@ To add a known setting, add an entry to `lib/paramCatalog.ts` (and a flag alias 
    - Merges user `stop` strings with the template's.
    - Separates thinking from the answer as it streams: llama.rn's `reasoning_content` with jinja (`reasoning_format` defaults to `auto`), else `splitThinking()` on `<think>` tags.
    - Streams tokens to the UI.
-5. Save the reply under `parentId` (and select it) with token count and speed. The answer goes in `content` and the thinking in `reasoning` (with `thinkingMs`); only answers are sent back to the model in later turns. A stopped reply is marked `stopped`; an empty stopped reply is discarded.
+5. Save the reply under `parentId` (and select it) with token count and speed. `messages.stopped` is 1 when the user stopped it and 2 when it hit the length limit or a full context.
+
+**Continue** passes the stopped reply as `cont`: `generate(..., prefill)` formats the chat up to the assistant turn (`getFormattedChat` with `add_generation_prompt`, or the manual template), appends the partial reply (`lib/continuation.ts`), and runs a raw-prompt completion; the result is written back into the same message. The answer goes in `content` and the thinking in `reasoning` (with `thinkingMs`); only answers are sent back to the model in later turns. A stopped reply is marked `stopped`; an empty stopped reply is discarded.
 
 `stopGeneration()` calls `stopCompletion()` immediately. `releaseModel()` stops and awaits any in-flight completion before releasing the context, so a model switch or unload never frees memory under a running completion.
 

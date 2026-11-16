@@ -4,6 +4,7 @@ import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type 
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
 import { linearLinks, pathTo, versionsOf, visiblePath } from './branches';
+import { BACKUP_FORMAT, BACKUP_VERSION, MODEL_SETTING_COLUMNS, buildInsert, matchModels, settingsToRestore, type Backup } from './backup';
 
 let _db: any = null;
 
@@ -430,4 +431,60 @@ export async function presetNameExists(name: string, excludeId?: string): Promis
     ? await db.getFirstAsync('SELECT 1 FROM prompt_presets WHERE name = ? AND id != ?', [name, excludeId])
     : await db.getFirstAsync('SELECT 1 FROM prompt_presets WHERE name = ?', [name]);
   return !!row;
+}
+
+// ── Backup ──
+
+/** Everything except model files, for a backup. */
+export async function exportBackup(): Promise<Backup> {
+  const db = await getDb();
+  const all = async (sql: string) => (db ? ((await db.getAllAsync(sql)) as Record<string, unknown>[]) : []);
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: Date.now(),
+    settings: await all('SELECT * FROM settings'),
+    models: await all('SELECT * FROM models'),
+    sessions: await all('SELECT * FROM sessions'),
+    messages: await all('SELECT * FROM messages ORDER BY createdAt ASC'),
+    presets: await all('SELECT * FROM prompt_presets'),
+  };
+}
+
+/**
+ * Replace chats, presets and settings with a backup's, in one transaction.
+ * Models stay; settings for models also on this phone are restored onto them.
+ */
+export async function restoreBackup(b: Backup): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const match = matchModels(b.models, (await getAllModels()) as unknown as Record<string, unknown>[]);
+  await db.withExclusiveTransactionAsync(async (tx: any) => {
+    const columns = async (table: string) =>
+      ((await tx.getAllAsync(`PRAGMA table_info(${table})`)) as { name: string }[]).map((c) => c.name);
+    const insertAll = async (table: string, rows: Record<string, unknown>[]) => {
+      const cols = await columns(table);
+      for (const row of rows) {
+        const q = buildInsert(table, row, cols);
+        if (q) await tx.runAsync(q.sql, q.values);
+      }
+    };
+
+    await tx.execAsync('DELETE FROM messages; DELETE FROM sessions; DELETE FROM prompt_presets;');
+    await tx.runAsync("DELETE FROM settings WHERE key != 'lastModelId'");
+    await insertAll('settings', settingsToRestore(b.settings));
+    await insertAll('sessions', b.sessions.map((s) => ({ ...s, modelId: s.modelId ? (match.get(String(s.modelId)) ?? null) : null })));
+    await insertAll('messages', b.messages);
+    await insertAll('prompt_presets', b.presets);
+    for (const m of b.models) {
+      const localId = match.get(String(m.id));
+      if (!localId) continue;
+      const fields = MODEL_SETTING_COLUMNS.filter((k) => k in m);
+      if (fields.length === 0) continue;
+      await tx.runAsync(
+        `UPDATE models SET ${fields.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`,
+        [...fields.map((k) => (m[k] ?? null) as any), localId],
+      );
+    }
+  });
 }

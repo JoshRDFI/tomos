@@ -3,6 +3,7 @@ import type { ChatMessage, ModelRecord } from '@/types';
 import { loadSignature, type ParamSet } from './params';
 import { formatPrompt } from './templates';
 import { resolveStreamView, type StreamState, type StreamView } from './thinking';
+import { buildContinuation, DEFAULT_THINK_TAGS, splitContinued, type Partial as PartialReply } from './continuation';
 import { fitToContext } from './contextWindow';
 
 let _context: any = null;
@@ -82,6 +83,8 @@ export interface GenerateResult {
   tokenCount: number;
   tokensPerSec: number;
   stopped: boolean;
+  /** Ended at the length limit (n_predict) or a full context, mid-reply. */
+  cutOff: boolean;
   /** Number of oldest history messages left out to fit the context window. */
   droppedMessages: number;
 }
@@ -105,6 +108,11 @@ export async function generate(
   params: ParamSet,
   /** Called as the reply streams in, with the thinking and answer so far. */
   onUpdate: (view: StreamView) => void,
+  /**
+   * Continue this partial reply instead of starting a new one. The result
+   * then holds the whole reply (old + new); token counts cover the new part.
+   */
+  prefill?: PartialReply,
 ): Promise<GenerateResult> {
   if (!isNative || !_context) {
     throw new Error('Model not loaded');
@@ -123,7 +131,13 @@ export async function generate(
   const requested = Number(params.n_predict);
   const half = Math.floor(nCtx / 2);
   const nPredict = Math.max(16, requested > 0 ? Math.min(requested, half) : half);
-  const { messages: fitted, dropped } = await fitToContext(messages, nCtx, nPredict, countTokens);
+  // A continuation's partial reply is part of the prompt, so count it too.
+  const toFit = prefill
+    ? [...messages, { role: 'assistant' as const, content: `${prefill.reasoning}\n${prefill.content}` }]
+    : messages;
+  const fit = await fitToContext(toFit, nCtx, nPredict, countTokens);
+  const fitted = prefill ? fit.messages.slice(0, -1) : fit.messages;
+  const dropped = fit.dropped;
 
   const templateKey = model.templateOverride ?? 'auto';
   const hasJinjaTemplate = model.detectedTemplate === 'auto-available' || !!_loadedParams?.chat_template;
@@ -138,7 +152,14 @@ export async function generate(
   // reasoning_format 'none' means: show the raw output, don't split.
   const splitEnabled = params.reasoning_format !== 'none';
   const st: StreamState = { raw: '', nativeThinking: null, nativeContent: null };
-  const view = () => resolveStreamView(st, splitEnabled);
+  // Set below for a continuation: the old reply, in the form the output continues.
+  let displayPrefix: string | null = null;
+  const view = (): StreamView => {
+    if (displayPrefix === null) return resolveStreamView(st, splitEnabled);
+    if (!splitEnabled) return { thinking: prefill?.reasoning ?? '', answer: (prefill?.content ?? '') + st.raw, thinkingOpen: false };
+    const s = splitContinued(displayPrefix, st.raw);
+    return { thinking: s.thinking, answer: s.answer, thinkingOpen: s.open };
+  };
 
   let firstTokenAt: number | null = null;
   let answerAt: number | null = null;
@@ -148,15 +169,47 @@ export async function generate(
     const now = Date.now();
     if (firstTokenAt === null) firstTokenAt = now;
     if (typeof data?.token === 'string') st.raw += data.token;
-    if (typeof data?.reasoning_content === 'string') st.nativeThinking = data.reasoning_content;
-    if (typeof data?.content === 'string') st.nativeContent = data.content;
+    // A continuation is a raw prompt; llama.rn has no chat parse for it.
+    if (displayPrefix === null) {
+      if (typeof data?.reasoning_content === 'string') st.nativeThinking = data.reasoning_content;
+      if (typeof data?.content === 'string') st.nativeContent = data.content;
+    }
     last = view();
     if (answerAt === null && last.answer.trim()) answerAt = now;
     onUpdate(last);
   };
 
+  const userStop = Array.isArray(params.stop) ? (params.stop as unknown[]).filter((x) => typeof x === 'string') as string[] : [];
   let request: any;
-  if (useJinja) {
+  if (prefill) {
+    // Format the chat up to the assistant's turn, then append the partial
+    // reply so the model carries on from it.
+    let prompt: string;
+    let stop: string[];
+    let tags = DEFAULT_THINK_TAGS;
+    let forcedOpen = false;
+    if (useJinja) {
+      const formatted: any = await ctx.getFormattedChat(
+        fitted.map((m) => ({ role: m.role, content: m.content })),
+        null,
+        { jinja: true, add_generation_prompt: true, enable_thinking: params.enable_thinking as boolean | undefined, chat_template_kwargs: params.chat_template_kwargs as any },
+      );
+      prompt = formatted.prompt ?? '';
+      stop = formatted.additional_stops ?? [];
+      if (formatted.thinking_start_tag && formatted.thinking_end_tag) tags = { start: formatted.thinking_start_tag, end: formatted.thinking_end_tag };
+      forcedOpen = !!formatted.thinking_forced_open;
+    } else {
+      const f = formatPrompt(templateKey === 'auto' ? 'chatml' : templateKey, fitted);
+      prompt = f.prompt;
+      stop = f.stop;
+    }
+    const cont = buildContinuation(prefill, tags, forcedOpen);
+    displayPrefix = cont.displayPrefix;
+    // If stopped before any new token, keep the old reply as it was.
+    last = view();
+    const { reasoning_format: _rf, enable_thinking: _et, chat_template_kwargs: _ck, ...rest } = sampling as any;
+    request = { ...rest, prompt: prompt + cont.promptSuffix, stop: [...stop, ...userStop] };
+  } else if (useJinja) {
     request = {
       ...sampling,
       messages: fitted.map((m) => ({ role: m.role, content: m.content })),
@@ -167,7 +220,6 @@ export async function generate(
   } else {
     const effectiveKey = templateKey === 'auto' ? 'chatml' : templateKey;
     const { prompt, stop } = formatPrompt(effectiveKey, fitted);
-    const userStop = Array.isArray(params.stop) ? (params.stop as unknown[]).filter((x) => typeof x === 'string') as string[] : [];
     request = { ...sampling, prompt, stop: [...stop, ...userStop] };
   }
 
@@ -183,7 +235,10 @@ export async function generate(
   // When stopped, keep exactly what the user saw rather than the full native
   // result, which can include tokens produced after the stop request.
   let final = last;
-  if (!stopRef.stop && result) {
+  if (!stopRef.stop && result && displayPrefix !== null) {
+    if (typeof result.text === 'string' && result.text.length >= st.raw.length) st.raw = result.text;
+    final = view();
+  } else if (!stopRef.stop && result) {
     if (typeof result.reasoning_content === 'string' && result.reasoning_content) st.nativeThinking = result.reasoning_content;
     if (typeof result.content === 'string' && (result.content || st.nativeContent !== null)) st.nativeContent = result.content;
     if (st.nativeThinking === null && st.nativeContent === null && typeof result.text === 'string') st.raw = result.text;
@@ -202,6 +257,7 @@ export async function generate(
     tokenCount: result?.timings?.predicted_n ?? 0,
     tokensPerSec: result?.timings?.predicted_per_second ?? 0,
     stopped: stopRef.stop,
+    cutOff: !stopRef.stop && (!!result?.stopped_limit || !!result?.context_full),
     droppedMessages: dropped,
   };
 }

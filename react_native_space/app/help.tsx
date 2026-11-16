@@ -42,6 +42,11 @@ const sections = [
     body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off, add the "Thinking" setting and switch it off (for one chat, a model, or all chats). Setting "Reasoning format" to None shows the raw output, tags included.`,
   },
   {
+    title: 'Versions, continuing and backups',
+    icon: 'source-branch',
+    body: `Regenerating a reply or editing a message keeps the old one: use ‹ 2/3 › under the message to switch between versions.\n\nIf a reply was stopped or cut off by the length limit, tap ▷ under it (or long-press → Continue) to let the model carry on from where it stopped.\n\nSettings → Backup saves all chats, presets and settings to one file you can keep in Files or Drive, and restores them later (model files aren't included).`,
+  },
+  {
     title: 'Performance tips',
     icon: 'speedometer',
     body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
