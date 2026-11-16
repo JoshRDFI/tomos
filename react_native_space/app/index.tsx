@@ -514,7 +514,7 @@ export default function ChatScreen() {
   }, [isStreaming, stream, handleCopy, handleRegenerate, handleContinue, handleSwitchVersion, displayCount]);
 
   const chatTopBar = (
-    <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top }]}>
+    <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top, height: 56 + insets.top, zIndex: 1 }]}>
       <IconButton icon="menu" size={24} iconColor={c.text} onPress={() => setDrawerOpen(true)} accessibilityLabel="Open menu" />
       <Pressable onPress={() => setModelMenuOpen(true)} style={styles.modelInfo}>
         <Text numberOfLines={1} style={[styles.modelName, { color: c.text, fontFamily: typeScale.titleSmall.fontFamily }]}>
@@ -582,7 +582,9 @@ export default function ChatScreen() {
             onOpenModelMenu={() => setModelMenuOpen(true)}
           />
         ) : (
-          <View style={{ flex: 1 }}>
+          // Clip the list so a tall message can never extend over (and take
+          // the taps of) the top bar.
+          <View style={{ flex: 1, overflow: 'hidden' }}>
             <FlashList
               key={session?.id ?? 'none'}
               data={displayMessages}
