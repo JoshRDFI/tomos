@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView, Alert } from 'react-native';
 import { Text, Button, useTheme, Card, Chip, IconButton, Menu, Dialog, Portal, TextInput as PaperInput, ActivityIndicator, RadioButton, Snackbar } from 'react-native-paper';
 import { useRouter, Stack } from 'expo-router';
@@ -6,13 +6,24 @@ import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, fontFamilies, typeScale } from '@/constants/theme';
 import { useModelContext } from '@/contexts/ModelContext';
 import * as db from '@/lib/db';
-import { parseQuantFromFilename, formatBytes, memoryHint } from '@/lib/gguf';
+import { parseQuantFromFilename, formatBytes, memoryHint, isPrismOnlyQuant } from '@/lib/gguf';
+import { base64ToBytes, checkCompatibility, GgufError, readGgufHeader, type CompatibilityReport } from '@/lib/ggufHeader';
 import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
 import { extractFileParams } from '@/lib/params';
 import type { ModelRecord, TemplateKey } from '@/types';
 import { TEMPLATE_OPTIONS } from '@/types';
 import WebNotice from '@/components/WebNotice';
+
+interface CompatWarning {
+  name: string;
+  /** Tensor formats this llama.cpp lacks. */
+  types: string[];
+  /** File name says PQ2_0 / PTQ1_0. */
+  prism: boolean;
+  /** Already copied: the choice is keep or remove. */
+  copied: boolean;
+}
 
 export default function ModelsScreen() {
   const theme = useTheme<AppTheme>();
@@ -32,12 +43,34 @@ export default function ModelsScreen() {
   const [renameDialog, setRenameDialog] = useState<ModelRecord | null>(null);
   const [renameText, setRenameText] = useState('');
   const [deleteDialog, setDeleteDialog] = useState<ModelRecord | null>(null);
+  // "This model may not load" warning before an import; resolves true to import anyway.
+  const [compatWarning, setCompatWarning] = useState<CompatWarning | null>(null);
+  const compatResolve = useRef<((proceed: boolean) => void) | null>(null);
+  const askImportAnyway = useCallback((w: CompatWarning) =>
+    new Promise<boolean>((resolve) => {
+      compatResolve.current = resolve;
+      setCompatWarning(w);
+    }), []);
+  const answerCompat = useCallback((proceed: boolean) => {
+    compatResolve.current?.(proceed);
+    compatResolve.current = null;
+    setCompatWarning(null);
+  }, []);
   const [snack, setSnack] = useState('');
   const [loadingModelId, setLoadingModelId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     if (isWeb) return;
-    const m = await db.getAllModels();
+    let m = await db.getAllModels();
+    // Fix labels from older versions that read e.g. PQ2_0 as Q2_0.
+    const relabel = m.filter((x) => {
+      const q = parseQuantFromFilename(x.fileName);
+      return q !== null && q !== x.quantization;
+    });
+    if (relabel.length > 0) {
+      for (const x of relabel) await db.updateModel(x.id, { quantization: parseQuantFromFilename(x.fileName) });
+      m = await db.getAllModels();
+    }
     setModels(m);
     try {
       const { Paths } = await import('expo-file-system');
@@ -68,9 +101,40 @@ export default function ModelsScreen() {
       }
 
       setImporting(true);
+      setImportMsg(`Checking ${name}…`);
+      const { readAsStringAsync, EncodingType, copyAsync } = await import('expo-file-system/legacy');
+      const { Paths, File, Directory } = await import('expo-file-system');
+      const nameQuant = parseQuantFromFilename(name);
+      const prism = isPrismOnlyQuant(nameQuant);
+      const stop = (msg?: string) => {
+        setImporting(false);
+        setImportMsg('');
+        if (msg) setSnack(msg);
+      };
+
+      // Warn about formats this llama.cpp can't load. The header is read
+      // straight from the picked file when Android allows it (files picked
+      // from phone storage), before copying gigabytes; otherwise (e.g. the
+      // Downloads provider) from the copy, right after copying.
+      const total = asset.size ?? Infinity;
+      let report: CompatibilityReport | null = null;
+      try {
+        report = checkCompatibility(await readGgufHeader(async (offset, length) => {
+          const len = Math.min(length, total - offset);
+          if (len <= 0) return new Uint8Array(0);
+          return base64ToBytes(await readAsStringAsync(asset.uri, { encoding: EncodingType.Base64, position: offset, length: len }));
+        }));
+      } catch (e) {
+        if (e instanceof GgufError) return stop(`Can't import ${name}: ${e.message}.`);
+        // This picker URI can't be read in parts; check after copying.
+      }
+      if ((report && !report.ok) || (report && prism)) {
+        const proceed = await askImportAnyway({ name, types: report.unsupportedTypes, prism, copied: false });
+        if (!proceed) return stop();
+      }
+      const checkedBeforeCopy = report !== null;
       setImportMsg(`Importing ${name}… keep the app open`);
 
-      const { Paths, File, Directory } = await import('expo-file-system');
       const modelsDir = new Directory(Paths.document, 'models');
       if (!modelsDir.exists) {
         modelsDir.create();
@@ -82,9 +146,37 @@ export default function ModelsScreen() {
       // The picker returns a content:// URI. The new File API can't copy from
       // those (it needs a real path), so use the legacy copyAsync, which
       // streams through the content resolver without loading the file into memory.
-      const { copyAsync } = await import('expo-file-system/legacy');
       copiedFile = dest;
       await copyAsync({ from: asset.uri, to: dest.uri });
+
+      if (!checkedBeforeCopy) {
+        setImportMsg(`Checking ${name}…`);
+        const handle = dest.open();
+        try {
+          report = checkCompatibility(await readGgufHeader(async (offset, length) => {
+            handle.offset = offset;
+            return handle.readBytes(Math.max(0, Math.min(length, (handle.size ?? Infinity) - offset)));
+          }));
+        } catch (e) {
+          if (e instanceof GgufError) {
+            handle.close();
+            dest.delete();
+            copiedFile = null;
+            return stop(`Can't import ${name}: ${e.message}.`);
+          }
+          console.warn('GGUF header check failed', e);
+        } finally {
+          try { handle.close(); } catch {}
+        }
+        if ((report && !report.ok) || prism) {
+          const keep = await askImportAnyway({ name, types: report?.unsupportedTypes ?? [], prism, copied: true });
+          if (!keep) {
+            dest.delete();
+            copiedFile = null;
+            return stop();
+          }
+        }
+      }
 
       const fileSize = asset.size || dest.size || 0;
 
@@ -113,7 +205,7 @@ export default function ModelsScreen() {
         // Don't block import; metadata is optional enhancement
       }
 
-      const quant = parseQuantFromFilename(name);
+      const quant = nameQuant ?? report?.fileType ?? null;
 
       const model: ModelRecord = {
         id,
@@ -318,6 +410,29 @@ export default function ModelsScreen() {
           <Dialog.Actions>
             <Button onPress={() => setDeleteDialog(null)}>Cancel</Button>
             <Button onPress={handleRemove} textColor={c.error}>Remove</Button>
+          </Dialog.Actions>
+        </Dialog>
+        {/* Format warning before import */}
+        <Dialog visible={!!compatWarning} dismissable={false} dismissableBackButton={false}>
+          <Dialog.Title>This model may not load</Dialog.Title>
+          <Dialog.Content style={{ gap: 8 }}>
+            <Text>
+              {compatWarning?.types.length
+                ? `${compatWarning.name} uses tensor formats the llama.cpp in this app can't load: ${compatWarning.types.join(', ')}.`
+                : `${compatWarning?.name} looks like a PrismML ${parseQuantFromFilename(compatWarning?.name ?? '')} file.`}
+            </Text>
+            {compatWarning?.prism && (
+              <Text>PQ2_0 and PTQ1_0 need PrismML's own llama.cpp fork. Download the Q2_0 version of the model instead; it has the same weights and runs on standard llama.cpp.</Text>
+            )}
+            <Text style={{ color: c.textSecondary }}>
+              {compatWarning?.copied
+                ? 'Loading it will most likely fail. Remove the copy to free the space?'
+                : 'Importing copies the whole file, and loading it will most likely fail.'}
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => answerCompat(true)}>{compatWarning?.copied ? 'Keep anyway' : 'Import anyway'}</Button>
+            <Button onPress={() => answerCompat(false)}>{compatWarning?.copied ? 'Remove' : 'Cancel'}</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>

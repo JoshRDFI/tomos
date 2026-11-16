@@ -1,8 +1,15 @@
-const QUANT_REGEX = /(IQ\d_[A-Z_]+|Q\d_K_[SML]|Q\d_K|Q\d_\d|F16|BF16|F32)/i;
+// A quant name standing alone in the file name (not part of a longer word,
+// so "PQ2_0" isn't read as "Q2_0"). Longer alternatives come first.
+const QUANT_REGEX = /(?:^|[^A-Za-z0-9])(PTQ1_0|PQ2_0|TQ[12]_0|IQ\d_(?:XXS|XS|S|M|NL)|Q\d_K_(?:XL|S|M|L)|Q\d_K|Q\d_\d|MXFP4|NVFP4|BF16|F16|F32)(?=$|[^A-Za-z0-9])/i;
 
 export function parseQuantFromFilename(fileName: string): string | null {
   const m = fileName?.match?.(QUANT_REGEX);
   return m?.[1]?.toUpperCase?.() ?? null;
+}
+
+/** PrismML's own packings, which need their llama.cpp fork. */
+export function isPrismOnlyQuant(quant: string | null): boolean {
+  return quant === 'PQ2_0' || quant === 'PTQ1_0';
 }
 
 export function formatBytes(bytes: number): string {

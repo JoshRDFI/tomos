@@ -50,6 +50,7 @@ react_native_space/
     branches.ts           visiblePath(), pathTo(), versionsOf(): message versions
     templates.ts          manual chat templates + stop strings
     gguf.ts               quant/size parsing from file names
+    ggufHeader.ts         GGUF header reader; checkCompatibility() against the bundled ggml types
     fts.ts                buildFtsQuery(): safe FTS5 MATCH strings
     thinking.ts           splitThinking(): separate <think> blocks from the answer
     markdown.ts           toMdAst(): markdown + GFM → mdast (ported from DeepSeek's demo, MIT)
@@ -72,7 +73,7 @@ All state is in SQLite, opened through `lib/sqliteLoader`. Tables:
 
 Migrations are additive and run at startup in `lib/db.ts` (`PRAGMA table_info` then `ALTER TABLE ADD COLUMN`); `getDb()` resolves only after they finish. Never rewrite or drop existing columns; installed copies carry old data.
 
-Model files are copied into `documentDirectory/models/` on import. The app never reads a model from its original location.
+Model files are copied into `documentDirectory/models/` on import (legacy `copyAsync`: the picker returns `content://` URIs, which the new File API can't copy). The app never reads a model from its original location. Before or right after the copy, `lib/ggufHeader.ts` reads the GGUF header and flags tensor types missing from the bundled llama.cpp. Its type tables mirror `ggml.h`/`llama.h` of the pinned llama.rn; update them when upgrading llama.rn.
 
 ## Model settings
 

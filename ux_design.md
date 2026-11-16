@@ -43,6 +43,7 @@ lib/contextWindow.ts  // drops oldest messages so the prompt + reply fit the con
 lib/fts.ts            // safe FTS5 query builder for search
 lib/templates.ts      // ChatML, Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca, raw formatters + stop strings
 lib/gguf.ts           // quantization-from-filename parser
+lib/ggufHeader.ts     // GGUF header reader + compatibility check
 contexts/SettingsContext.tsx, contexts/ModelContext.tsx
 __tests__/            // jest: params, contextWindow, fts, templates
 ```
@@ -304,12 +305,15 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 1. Open `DocumentPicker.getDocumentAsync({type: '*/*', copyToCacheDirectory: false})`.
 2. Validate: the name ends with `.gguf` (case-insensitive), else show the error "Not a GGUF file. Only .gguf models are supported."
 3. Check free space against size, else show "Not enough storage to import (needs X GB)."
+3a. **Format check** (`lib/ggufHeader.ts`, "Checking name…"): read the GGUF header (metadata and tensor list, usually a few MB) and list tensor types the bundled llama.cpp doesn't have, plus PQ2_0/PTQ1_0 in the file name (PrismML's own packings).
+   - The header is read from the picked file before copying when Android allows reading it in parts (files picked from phone storage). Files from the Downloads provider can't be, so they're checked right after copying.
+   - Not a GGUF, or a truncated header: snackbar "Can't import name: reason." and nothing is kept.
+   - Unsupported formats: dialog "This model may not load" naming the formats; for PQ2_0/PTQ1_0 it suggests the Q2_0 download. Before copying: "Import anyway" / "Cancel". After copying: "Keep anyway" / "Remove". Not dismissable by tapping outside.
 4. Copy to `documentDirectory/models/<uuid>-<fileName>` with a progress dialog: indeterminate bar, "Importing 4.9 GB… keep the app open", and a Cancel button.
 5. Read metadata via `loadLlamaModelInfo(path)`: `general.name`, `general.architecture`, `general.file_type`, `general.size_label`, `<arch>.context_length`, `tokenizer.chat_template`.
-6. Quantization comes from the filename regex `(IQ\d_[A-Z_]+|Q\d_K_[SML]|Q\d_K|Q\d_\d|F16|BF16|F32)` (case-insensitive), falling back to file_type.
+6. Quantization comes from the file name (`parseQuantFromFilename`: a quant name standing alone, so `PQ2_0` isn't read as `Q2_0`; includes PQ2_0, PTQ1_0, TQ1_0/TQ2_0, IQ*, Q*_K_XL, MXFP4), falling back to the header's `general.file_type`. Labels saved by older versions are corrected when the Models screen opens.
 7. Read the file's recommended settings (`general.sampling.*`) into `fileParams`.
 8. If metadata reading or anything else fails, delete the copy and show: "This file isn't a readable GGUF model."
-- A format check for llama.cpp-fork-only quant types (PQ2_0, PTQ1_0) and a fix for quant labels are **(planned)**.
 
 **Model list** (cards, one per model)
 - displayName (titleMedium).
@@ -498,6 +502,6 @@ In order (tracked in Archon):
 2. ~~Separate thinking display~~ (done, `feature/thinking-display`)
 3. ~~Full markdown rendering (headings, lists, tables, links) with throttled streaming updates~~ (done, `feature/markdown`)
 4. ~~Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages~~ (done, `feature/branching`)
-5. Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix.
+5. ~~Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix~~ (done, `feature/gguf-check`)
 6. Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata.
 </roadmap>
