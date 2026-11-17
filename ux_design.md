@@ -315,6 +315,7 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 6. Quantization comes from the file name (`parseQuantFromFilename`: a quant name standing alone, so `PQ2_0` isn't read as `Q2_0`; includes PQ2_0, PTQ1_0, TQ1_0/TQ2_0, IQ*, Q*_K_XL, MXFP4), falling back to the header's `general.file_type`. Labels saved by older versions are corrected when the Models screen opens.
 7. Read the file's recommended settings (`general.sampling.*`) into `fileParams`.
 8. If metadata reading or anything else fails, delete the copy and show: "This file isn't a readable GGUF model."
+9. On success, dialog "Delete the original?" naming the file and its size: "Keep" / "Delete" (red; tapping outside = Keep). Delete removes the picked `content://` document through the new File API (`DocumentsContract.deleteDocument`). Snackbar "Model added. Original deleted." or, when the provider refuses, "Model added, but the original couldn't be deleted. Delete name in the Files app."
 
 **Model list** (cards, one per model)
 - displayName (titleMedium).
@@ -378,7 +379,7 @@ Static sections as Paper List.Accordion items:
 1. **Supported format:** GGUF only (llama.cpp). Other formats (safetensors, .bin, PyTorch, MLC, ONNX) must be converted or downloaded as GGUF.
 2. **Which quantization:** On a Pixel 9 Pro XL (~16 GB RAM), Q4_K_M is the best balance and Q5_K_M is slightly better quality, for 3B–8B models. Approximate file sizes: 3B Q4_K_M ≈ 2 GB, 7–8B Q4_K_M ≈ 4.5–5 GB, 8B Q5_K_M ≈ 5.7 GB. Avoid models over ~9 GB; larger context lengths use more memory.
 3. **Where to find models:** Hugging Face (search "GGUF"), bartowski, TheBloke, lmstudio-community, unsloth. Good starters: Llama 3.1/3.2, Qwen 2.5, Gemma 2, Phi-3.5, Mistral 7B.
-4. **Copying files to the phone:** USB cable to the Downloads folder (File Transfer mode), Android Files app, or downloading directly on the phone in a browser. Then use Models → Add GGUF model. The app copies the file into its own storage, so you can delete the original afterwards to save space.
+4. **Copying files to the phone:** USB cable to the Downloads folder (File Transfer mode), Android Files app, or downloading directly on the phone in a browser. Then use Models → Add GGUF model. The app copies the file into its own storage and then offers to delete the original to save space.
 5. **Chat templates:** Auto reads the template from the file. If replies look garbled or never stop, set the matching template in Models.
 6. **Model settings (llama.cpp):** the five layers, Add setting / Custom… / Paste flags, and that "reloads model" settings apply before the next reply.
 7. **Performance tips:** threads = number of fast cores (4 on a Pixel 9). Keep context at 4096 unless needed. The first load is slower.

@@ -78,7 +78,7 @@ Backups (`Settings → Backup`) are a JSON dump of every table except model file
 
 Migrations are additive and run at startup in `lib/db.ts` (`PRAGMA table_info` then `ALTER TABLE ADD COLUMN`); `getDb()` resolves only after they finish. Never rewrite or drop existing columns; installed copies carry old data.
 
-Model files are copied into `documentDirectory/models/` on import (legacy `copyAsync`: the picker returns `content://` URIs, which the new File API can't copy). The app never reads a model from its original location. Before or right after the copy, `lib/ggufHeader.ts` reads the GGUF header and flags tensor types missing from the bundled llama.cpp. Its type tables mirror `ggml.h`/`llama.h` of the pinned llama.rn; update them when upgrading llama.rn.
+Model files are copied into `documentDirectory/models/` on import (legacy `copyAsync`: the picker returns `content://` URIs, which the new File API can't copy). The app never reads a model from its original location; after a successful import it offers to delete the picked original (`new File(contentUri).delete()`, which goes through `DocumentsContract.deleteDocument`; the legacy `deleteAsync` only accepts `com.android.externalstorage` URIs, so it can't delete from the Downloads provider). Before or right after the copy, `lib/ggufHeader.ts` reads the GGUF header and flags tensor types missing from the bundled llama.cpp. Its type tables mirror `ggml.h`/`llama.h` of the pinned llama.rn; update them when upgrading llama.rn.
 
 ## Model settings
 

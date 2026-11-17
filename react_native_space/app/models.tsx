@@ -56,6 +56,9 @@ export default function ModelsScreen() {
     compatResolve.current = null;
     setCompatWarning(null);
   }, []);
+  // After a successful import: offer to delete the picked original, since
+  // the import is a copy and models are several GB.
+  const [originalPrompt, setOriginalPrompt] = useState<{ name: string; uri: string; size: number } | null>(null);
   const [snack, setSnack] = useState('');
   const [loadingModelId, setLoadingModelId] = useState<string | null>(null);
 
@@ -228,7 +231,7 @@ export default function ModelsScreen() {
       setImporting(false);
       setImportMsg('');
       refresh();
-      setSnack('Model added');
+      setOriginalPrompt({ name, uri: asset.uri, size: fileSize });
     } catch (e) {
       try { if (copiedFile?.exists) copiedFile.delete(); } catch {}
       setImporting(false);
@@ -236,6 +239,28 @@ export default function ModelsScreen() {
       setSnack('Import failed: ' + String((e as any)?.message ?? e));
     }
   }, [isWeb, refresh]);
+
+  const deleteOriginal = useCallback(async () => {
+    const original = originalPrompt;
+    setOriginalPrompt(null);
+    if (!original) return;
+    try {
+      // content:// URI from ACTION_OPEN_DOCUMENT: the new File API deletes it
+      // through DocumentsContract, which works when the picker granted write
+      // access and the provider (Downloads, phone storage) supports deleting.
+      const { File } = await import('expo-file-system');
+      new File(original.uri).delete();
+      setSnack('Model added. Original deleted.');
+    } catch (e) {
+      console.warn('Deleting the original failed', e);
+      setSnack(`Model added, but the original couldn't be deleted. Delete ${original.name} in the Files app.`);
+    }
+  }, [originalPrompt]);
+
+  const keepOriginal = useCallback(() => {
+    setOriginalPrompt(null);
+    setSnack('Model added');
+  }, []);
 
   const handleLoad = useCallback(async (model: ModelRecord) => {
     if (modelCtx.isGenerating) {
@@ -412,6 +437,20 @@ export default function ModelsScreen() {
             <Button onPress={handleRemove} textColor={c.error}>Remove</Button>
           </Dialog.Actions>
         </Dialog>
+        {/* Offer to delete the picked original after a successful import */}
+        <Dialog visible={!!originalPrompt} onDismiss={keepOriginal}>
+          <Dialog.Title>Delete the original?</Dialog.Title>
+          <Dialog.Content style={{ gap: 8 }}>
+            <Text style={{ color: c.text }}>
+              {originalPrompt?.name} is now in the app's own storage. The file you picked{originalPrompt?.size ? ` (${formatBytes(originalPrompt.size)})` : ''} is a separate copy the app doesn't need.
+            </Text>
+            <Text style={{ color: c.textSecondary }}>Deleting it frees the space. This can't be undone.</Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={keepOriginal}>Keep</Button>
+            <Button onPress={deleteOriginal} textColor={c.error}>Delete</Button>
+          </Dialog.Actions>
+        </Dialog>
         {/* Format warning before import */}
         <Dialog visible={!!compatWarning} dismissable={false} dismissableBackButton={false}>
           <Dialog.Title>This model may not load</Dialog.Title>
@@ -437,7 +476,7 @@ export default function ModelsScreen() {
         </Dialog>
       </Portal>
 
-      <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={2000}>{snack}</Snackbar>
+      <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={snack.length > 60 ? 5000 : 2000}>{snack}</Snackbar>
     </>
   );
 }
