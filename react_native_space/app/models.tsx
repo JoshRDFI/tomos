@@ -14,6 +14,7 @@ import { extractFileParams } from '@/lib/params';
 import type { ModelRecord, TemplateKey } from '@/types';
 import { TEMPLATE_OPTIONS } from '@/types';
 import WebNotice from '@/components/WebNotice';
+import SpikeDownload from '@/components/SpikeDownload';
 
 interface CompatWarning {
   name: string;
@@ -336,6 +337,7 @@ export default function ModelsScreen() {
         <Button mode="contained" icon="plus" onPress={addModel} loading={importing} disabled={importing} style={{ borderRadius: radii.button }}>
           {importing ? importMsg : 'Add GGUF model'}
         </Button>
+        <SpikeDownload />
 
         {/* Models list */}
         {models.length === 0 && !importing && (

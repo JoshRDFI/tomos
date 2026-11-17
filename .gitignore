@@ -48,3 +48,5 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+.superpowers/
+react_native_space/modules/*/android/build/
