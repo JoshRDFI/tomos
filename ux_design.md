@@ -529,7 +529,7 @@ In order (tracked in Archon):
 5. ~~Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix~~ (done, `feature/gguf-check`)
 6. ~~Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata~~ (done, `feature/continue-date-backup`)
 7. After import, offer to delete the original file (`feature/delete-original-after-import`, awaiting device test)
-8. ~~Download models in the app from Hugging Face, straight into app storage~~ (done, `feature/hf-download`, awaiting device test)
+8. ~~Download models in the app from Hugging Face, straight into app storage~~ (done, `feature/hf-download`)
 9. (planned) Save and restore each chat's KV cache so long chats reopen without re-reading the history
 10. (planned) Search: scroll to and highlight the matched message
 11. (planned) Keep generating in the background (foreground service with a notification)
