@@ -22,7 +22,7 @@ jest.mock('expo-file-system', () => ({
 import * as db from '../lib/db';
 import * as downloader from '../lib/downloader';
 import { finishModel } from '../lib/modelImport';
-import { cancelDownload, failureText, reconcile, removeDownloadedModelFiles, retryFailed, startDownload, syncDownloads } from '../lib/downloads';
+import { cancelDownload, failureText, reconcile, remainingBytes, removeDownloadedModelFiles, retryFailed, startDownload, syncDownloads } from '../lib/downloads';
 import type { DownloadRecord } from '../types';
 import type { DlInfo } from '../lib/downloader';
 
@@ -127,6 +127,44 @@ describe('startDownload', () => {
     expect(d.parts.map((p) => p.dmId)).toEqual([101, 102]);
     expect(d).toMatchObject({ status: 'active', revision: 'sha1', totalBytes: 30, label: 'R-BF16.gguf' });
     expect(m.insert).toHaveBeenCalledWith(d);
+  });
+});
+
+describe('startDownload failures', () => {
+  const row = { key: 'k', label: 'R.gguf', files: [{ path: 'a-00001-of-00002.gguf', size: 1 }, { path: 'a-00002-of-00002.gguf', size: 1 }], totalBytes: 2, quant: null, prism: false };
+
+  it('removes parts already queued when a later enqueue fails', async () => {
+    m.enqueue.mockResolvedValueOnce(101).mockRejectedValueOnce(new Error('boom'));
+    await expect(startDownload({ repo: 'u/r', sha: 's', row, wifiOnly: true })).rejects.toThrow('boom');
+    expect(m.remove).toHaveBeenCalledWith([101]);
+  });
+
+  it('removes every queued part when saving the record fails', async () => {
+    m.enqueue.mockResolvedValueOnce(101).mockResolvedValueOnce(102);
+    m.insert.mockRejectedValueOnce(new Error('disk'));
+    await expect(startDownload({ repo: 'u/r', sha: 's', row, wifiOnly: true })).rejects.toThrow('disk');
+    expect(m.remove).toHaveBeenCalledWith([101, 102]);
+  });
+});
+
+describe('retryFailed failures', () => {
+  it('removes parts it re-queued when a later enqueue fails, leaving the record failed', async () => {
+    m.enqueue.mockResolvedValueOnce(201).mockRejectedValueOnce(new Error('boom'));
+    const d = rec({ status: 'failed', parts: rec().parts.map((p) => ({ ...p, status: 'failed' as const })) });
+    await expect(retryFailed(d)).rejects.toThrow('boom');
+    expect(m.remove).toHaveBeenLastCalledWith([201]);
+    expect(m.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('remainingBytes', () => {
+  it('counts what active downloads still need, ignoring finished parts and failed records', () => {
+    const active = rec({ parts: [
+      { dmId: 11, path: 'a', size: 10, status: 'done' },
+      { dmId: 12, path: 'b', size: 20, status: 'active' },
+    ] });
+    const failed = rec({ id: 'd2', status: 'failed' });
+    expect(remainingBytes([active, failed], [{ ...info(12, 'running'), bytesSoFar: 5 }])).toBe(15);
   });
 });
 

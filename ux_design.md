@@ -323,7 +323,7 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 - Label, progress bar (bytes across all parts), "1.2 GB of 4.9 GB · N parts".
 - Status line: "Waiting for Wi-Fi" (paused, queued for Wi-Fi), "Paused, retrying" (other pauses), or the failure in red ("Not enough storage", "The download was removed from Android's download list.", "This file isn't a readable GGUF model.", HTTP errors).
 - Actions: Cancel while running; Remove and Retry when failed. Retry re-queues only the failed parts, from zero.
-- The screen reconciles with DownloadManager on focus and every second while shown. When every part has finished, the model is created (same metadata steps as import) exactly once, the card disappears, and a snackbar says "Model downloaded".
+- The screen reconciles with DownloadManager on focus and every second while shown. The Chat screen also reconciles at startup and when the app returns to the foreground, with a snackbar "<model> downloaded". When every part has finished, the model is created (same metadata steps as import) exactly once, the card disappears, and a snackbar says "Model downloaded".
 
 **Model list** (cards, one per model)
 - displayName (titleMedium).
@@ -345,10 +345,10 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 Stack header: "Download from Hugging Face". Android only.
 
 1. Link field, prefilled from the clipboard when it holds a Hugging Face link (`parseHfLink`: model card, file page, resolve link, `hf.co`, bare `owner/repo`, or post text containing a link; query and fragment ignored). Button "Find files". No network until it's tapped.
-2. Looks up the repo (`/api/models/<repo>?blobs=true`). Errors: "No public model at <repo>. Check the link." (missing or private); gated: "This model needs a Hugging Face login, which the app doesn't support yet. Download it in a browser and use Add GGUF model."; "Couldn't reach Hugging Face." with Retry.
+2. Looks up the repo (`/api/models/<repo>?blobs=true`, or at the branch/tag/commit the link names). Errors: "No public model at <repo>. Check the link." (missing or private; "<repo> (version <rev>)" for an unknown revision); gated: "This model needs a Hugging Face login, which the app doesn't support yet. Download it in a browser and use Add GGUF model."; "Couldn't reach Hugging Face." with Retry.
 3. **File list** when the repo has GGUF files: one card per file, split sets (`-0000N-of-0000M`) as one row, `mmproj` files hidden, smallest first. Chips: quant, size, "N parts", the RAM hint (same as model cards), "Needs PrismML llama.cpp" for PQ2_0/PTQ1_0. A link naming a file highlights and scrolls to its row.
 4. **GGUF versions** when it has none: "No GGUF files here. GGUF versions of <repo>:" then repos quantized from it, by downloads (id, downloads, likes); tapping one loads it. None: "No GGUF versions found on Hugging Face."
-5. Tapping a file: free-space check (size + 500 MB) → "Not enough storage (needs X GB)."; then the GGUF header check over HTTP range requests ("Checking <label>…"): not a GGUF → "Can't download <label>: reason."; unsupported formats or PrismML → "This model may not load" with "Download anyway" / "Cancel".
+5. Tapping a file: free-space check (size + what downloads in progress still need + 500 MB) → "Not enough storage (needs X GB)." (naming the in-progress share when there is one); then the GGUF header check over HTTP range requests ("Checking <label>…"): not a GGUF → "Can't download <label>: reason."; unsupported formats or PrismML → "This model may not load" with "Download anyway" / "Cancel".
 6. Confirm dialog "Download <label>?": "<size>. Android downloads it in the background, with a notification. You can leave the app." and a "Wi-Fi only" switch (on by default; can't be changed after starting). Download → back to Models, where the card appears.
 
 ### 5. Settings (app/settings/index.tsx)

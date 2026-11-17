@@ -45,10 +45,13 @@ async function get(url: string, init?: RequestInit): Promise<Response> {
   }
 }
 
-export async function fetchRepo(repo: string): Promise<HfRepoInfo> {
-  const res = await get(`${HUB}/api/models/${repo}?blobs=true`);
+/** The repo's files at `revision` (a branch, tag or commit from the link), or the default branch. */
+export async function fetchRepo(repo: string, revision?: string | null): Promise<HfRepoInfo> {
+  const at = revision ? `/revision/${encodeURIComponent(revision)}` : '';
+  const res = await get(`${HUB}/api/models/${repo}${at}?blobs=true`);
   // Anonymous requests get 401 for private and nonexistent repos alike.
   if (res.status === 401 || res.status === 404) throw new HfError('not_found', `No public model at ${repo}`);
+  if (res.status === 403) throw new HfError('gated', `${repo} needs a Hugging Face login`);
   if (!res.ok) throw new HfError('http', `Hugging Face returned ${res.status}`);
   const d = await res.json();
   // Gated repos list their files but refuse the downloads.

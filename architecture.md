@@ -92,13 +92,14 @@ Model files are copied into `documentDirectory/models/` on import (legacy `copyA
 ## Hugging Face downloads
 
 - **Network.** Only on explicit user action, anonymous, to `huggingface.co`:
-  - `GET /api/models/<repo>?blobs=true` → `{id, sha, gated, siblings[{rfilename, size}]}`. Missing and private repos both return 401; gated repos return 200 with `gated: "auto"|"manual"`, so the app checks that field.
+  - `GET /api/models/<repo>?blobs=true` → `{id, sha, gated, siblings[{rfilename, size}]}`, or `/api/models/<repo>/revision/<rev>?blobs=true` when the link names a branch, tag or commit (unknown revision → 404). Missing and private repos both return 401; gated repos return 200 with `gated: "auto"|"manual"`, so the app checks that field (and treats a 403 as needing a login).
   - `GET /api/models?filter=base_model:quantized:<repo>&filter=gguf&sort=downloads&direction=-1&limit=20` for an original model's GGUF versions.
   - `GET /<repo>/resolve/<sha>/<path>` (302 to the CDN, supports `Range`). Files are fetched by the repo `sha`, not `main`, so every part of a split model comes from one revision. The header check reads the first MB or so with range requests.
 - **Native module** `modules/hf-download` (Expo Modules, Kotlin; `android/` is generated, so native code lives only here). It wraps `DownloadManager`: `enqueue` (`setDestinationInExternalFilesDir`, `setAllowedOverMetered(!wifiOnly)`, visible notification), `query` (status, bytes, reason, local path; ids Android no longer knows come back as `missing`), `remove`. No storage permission is needed.
 - **Files** go to `getExternalFilesDir(null)/models/<download id>/<basename>` (`Android/data/<package>/files/models/…`), one folder per model so split parts sit together and llama.cpp finds them from the first part. The download id becomes the model id. Removing the model deletes the folder. Imported models stay in `documentDirectory/models/`.
-- **Reconciliation** (`lib/downloads.ts`): the Models screen calls `syncDownloads()` on focus and every second. It queries DownloadManager for active downloads, marks parts done or failed (`reconcile()`, pure and tested), and finishes a download once every part is done: claim it (`status = 'done'`) after re-reading the row, then `finishModel()`. Concurrent calls share one run, so focus firing twice can't create two models. Downloads that finish while the app is closed are picked up next time Models opens.
-- Retry re-enqueues failed parts from zero after removing their old DownloadManager entries; finished parts are kept.
+- **Reconciliation** (`lib/downloads.ts`): the Models screen calls `syncDownloads()` on focus and every second; the chat screen calls it at startup and whenever the app returns to the foreground. It queries DownloadManager for active downloads, marks parts done or failed (`reconcile()`, pure and tested), and finishes a download once every part is done: claim it (`status = 'done'`) after re-reading the row, then `finishModel()`. Concurrent calls share one run, so focus firing twice can't create two models. Downloads that finish while the app is closed are picked up next time Models opens.
+- Retry re-enqueues failed parts from zero after removing their old DownloadManager entries; finished parts are kept. If queueing or saving fails partway (start or Retry), the parts queued so far are removed, so nothing downloads untracked.
+- The free-space check before a download counts what downloads in progress still need (`pendingDownloadBytes()`).
 
 ## Model settings
 

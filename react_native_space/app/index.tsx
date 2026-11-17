@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState } from 'react-native';
+import * as downloader from '@/lib/downloader';
+import { syncDownloads } from '@/lib/downloads';
 import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Drawer as DrawerLayout } from 'react-native-drawer-layout';
@@ -104,6 +106,25 @@ export default function ChatScreen() {
     const m = await db.getAllModels();
     setModels(m);
   }, [isWeb]);
+
+  // Hugging Face downloads that finished while the app was away become models
+  // here too, not only on the Models screen.
+  useEffect(() => {
+    if (isWeb || !downloader.isSupported()) return;
+    const check = async () => {
+      try {
+        const { finished } = await syncDownloads();
+        if (finished.length === 0) return;
+        refreshSessions();
+        setSnack(finished.length === 1 ? `${finished[0].displayName} downloaded` : `${finished.length} models downloaded`);
+      } catch (e) {
+        console.warn('Download sync failed', e);
+      }
+    };
+    check();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') check(); });
+    return () => sub.remove();
+  }, [isWeb, refreshSessions]);
 
   // On returning to this screen: pick up session edits (chat settings), a
   // session chosen from search, and models added/removed on the Models screen.
