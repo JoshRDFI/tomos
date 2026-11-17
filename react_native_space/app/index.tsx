@@ -44,6 +44,8 @@ export default function ChatScreen() {
   const [stream, setStream] = useState<llama.StreamView>(EMPTY_STREAM);
   const [isStreaming, setIsStreaming] = useState(false);
   const [editMode, setEditMode] = useState<{ messageId: string; text: string } | null>(null);
+  // Suggestion chip text for the user to finish in the message box.
+  const [draft, setDraft] = useState<{ text: string; key: number } | null>(null);
   const [renameDialog, setRenameDialog] = useState<SessionRecord | null>(null);
   const [deleteDialog, setDeleteDialog] = useState<SessionRecord | null>(null);
   const [renameText, setRenameText] = useState('');
@@ -578,7 +580,7 @@ export default function ChatScreen() {
             hasModels={(models?.length ?? 0) > 0}
             loadedModel={modelCtx.loadedModel}
             hasModelInLib={(models?.length ?? 0) > 0}
-            onSuggestion={(s) => sendMessage(s)}
+            onSuggestion={(s) => setDraft({ text: s, key: Date.now() })}
             onOpenModelMenu={() => setModelMenuOpen(true)}
           />
         ) : (
@@ -604,6 +606,7 @@ export default function ChatScreen() {
           isGenerating={isStreaming}
           modelReady={modelReady}
           editMode={editMode ? { text: editMode.text, onCancel: () => setEditMode(null) } : null}
+          draft={draft}
         />
       </View>
     </KeyboardAvoidingView>

@@ -11,18 +11,28 @@ interface Props {
   isGenerating: boolean;
   modelReady: boolean;
   editMode?: { text: string; onCancel: () => void } | null;
+  /** Text to put in the box for the user to finish (suggestion chips); a new `key` re-applies it. */
+  draft?: { text: string; key: number } | null;
 }
 
-export default function ChatInput({ onSend, onStop, isGenerating, modelReady, editMode }: Props) {
+export default function ChatInput({ onSend, onStop, isGenerating, modelReady, editMode, draft }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
   const scaleAnim = useRef(new Animated.Value(1)).current;
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
     if (editMode?.text) setText(editMode.text);
   }, [editMode?.text]);
+
+  useEffect(() => {
+    if (!draft) return;
+    setText(draft.text);
+    // Focus after the text lands so the cursor sits at the end.
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }, [draft?.key]);
 
   const handleSend = () => {
     const trimmed = text.trim();
@@ -68,6 +78,7 @@ export default function ChatInput({ onSend, onStop, isGenerating, modelReady, ed
       )}
       <View style={styles.row}>
         <TextInput
+          ref={inputRef}
           style={[styles.input, { backgroundColor: c.surfaceRaised, color: c.text, fontFamily: fontFamilies.inter, borderColor: c.hairline }]}
           value={text}
           onChangeText={setText}

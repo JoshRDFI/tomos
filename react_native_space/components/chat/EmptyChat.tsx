@@ -6,11 +6,12 @@ import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, typeScale, fontFamilies } from '@/constants/theme';
 import type { ModelRecord } from '@/types';
 
+// Sentence starters: tapping one puts it in the message box to finish.
 const SUGGESTIONS = [
-  'Explain a concept simply',
-  'Summarize this text:',
-  'Write a Python function that…',
-  'Brainstorm ideas for…',
+  { label: 'Explain a concept simply', text: 'Explain simply: ' },
+  { label: 'Summarize this text…', text: 'Summarize this text:\n' },
+  { label: 'Write a Python function that…', text: 'Write a Python function that ' },
+  { label: 'Brainstorm ideas for…', text: 'Brainstorm ideas for ' },
 ];
 
 interface Props {
@@ -76,8 +77,8 @@ export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSug
         )}
         <View style={styles.suggestionsWrap}>
           {SUGGESTIONS.map((s, i) => (
-            <Pressable key={i} onPress={() => onSuggestion(s)} style={[styles.suggChip, { backgroundColor: c.surfaceRaised, borderColor: c.hairline }]}>
-              <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14 }}>{s}</Text>
+            <Pressable key={i} onPress={() => onSuggestion(s.text)} style={[styles.suggChip, { backgroundColor: c.surfaceRaised, borderColor: c.hairline }]}>
+              <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14 }}>{s.label}</Text>
             </Pressable>
           ))}
         </View>

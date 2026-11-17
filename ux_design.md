@@ -241,7 +241,7 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
   - Text button "What files do I need?", which pushes Help.
 - **Model ready, empty chat:**
   - Large model name (display style, wraps to two lines max) with its quant/size chip.
-  - Below it, 4 suggestion chips that fill the composer when tapped: "Explain a concept simply", "Summarize this text:", "Write a Python function that…", "Brainstorm ideas for…".
+  - Below it, 4 suggestion chips that fill the composer (never send) when tapped, focused with the cursor at the end so the user finishes the sentence: "Explain a concept simply" → "Explain simply: ", "Summarize this text…" → "Summarize this text:" + newline, "Write a Python function that…", "Brainstorm ideas for…".
   - These sit in the lower half, above the composer.
 - **Session has no model and the library is not empty:** inline row "Choose a model for this chat" with a button that opens the model-switch menu.
 
