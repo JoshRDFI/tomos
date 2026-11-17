@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
+import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
 import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
@@ -100,6 +100,20 @@ async function createTables() {
       name TEXT UNIQUE NOT NULL,
       content TEXT NOT NULL,
       createdAt INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS downloads (
+      id TEXT PRIMARY KEY,
+      repo TEXT NOT NULL,
+      revision TEXT NOT NULL,
+      fileName TEXT NOT NULL,
+      label TEXT NOT NULL,
+      parts TEXT NOT NULL,
+      totalBytes INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      wifiOnly INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL,
+      error TEXT
     );
   `);
 
@@ -245,6 +259,55 @@ export async function deleteModel(id: string): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.runAsync('DELETE FROM models WHERE id = ?', [id]);
+}
+
+// ── Downloads (Hugging Face; not part of backups) ──
+
+function rowToDownload(r: any): DownloadRecord {
+  return { ...r, parts: JSON.parse(r.parts), wifiOnly: !!r.wifiOnly };
+}
+
+export async function insertDownload(d: DownloadRecord): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.runAsync(
+    `INSERT INTO downloads (id, repo, revision, fileName, label, parts, totalBytes, status, wifiOnly, createdAt, error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [d.id, d.repo, d.revision, d.fileName, d.label, JSON.stringify(d.parts), d.totalBytes, d.status, d.wifiOnly ? 1 : 0, d.createdAt, d.error]
+  );
+}
+
+export async function updateDownload(id: string, patch: Partial<DownloadRecord>): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const keys = Object.keys(patch).filter((k) => k !== 'id');
+  if (keys.length === 0) return;
+  const vals = keys.map((k) => {
+    const v = (patch as any)[k];
+    return k === 'parts' ? JSON.stringify(v) : k === 'wifiOnly' ? (v ? 1 : 0) : v;
+  });
+  await db.runAsync(`UPDATE downloads SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...vals, id]);
+}
+
+export async function getDownload(id: string): Promise<DownloadRecord | null> {
+  const db = await getDb();
+  if (!db) return null;
+  const r = await db.getFirstAsync('SELECT * FROM downloads WHERE id = ?', [id]);
+  return r ? rowToDownload(r) : null;
+}
+
+/** Downloads still worth showing: in progress or failed (awaiting Retry/Cancel). */
+export async function getActiveDownloads(): Promise<DownloadRecord[]> {
+  const db = await getDb();
+  if (!db) return [];
+  const rows = await db.getAllAsync("SELECT * FROM downloads WHERE status IN ('active', 'failed') ORDER BY createdAt");
+  return (rows as any[]).map(rowToDownload);
+}
+
+export async function deleteDownload(id: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.runAsync('DELETE FROM downloads WHERE id = ?', [id]);
 }
 
 // ── Sessions ──

@@ -91,3 +91,25 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
 }
+
+export interface DownloadPart {
+  dmId: number;
+  /** Path within the Hugging Face repo, e.g. "BF16/x-00001-of-00002.gguf". */
+  path: string;
+  size: number;
+  status: 'active' | 'done' | 'failed';
+}
+
+export interface DownloadRecord {
+  id: string;
+  repo: string;
+  revision: string;
+  fileName: string;
+  label: string;
+  parts: DownloadPart[];
+  totalBytes: number;
+  status: 'active' | 'done' | 'failed' | 'cancelled';
+  wifiOnly: boolean;
+  createdAt: number;
+  error: string | null;
+}
