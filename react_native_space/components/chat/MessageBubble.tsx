@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, StyleSheet, Pressable } from 'react-native';
-import { Text, IconButton, useTheme, Icon } from 'react-native-paper';
+import { Text, IconButton, useTheme, Icon, ActivityIndicator } from 'react-native-paper';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, fontFamilies } from '@/constants/theme';
 import Markdown from './Markdown';
@@ -103,6 +103,24 @@ function VersionSwitcher({ index, count, onSwitch }: { index: number; count: num
   );
 }
 
+/** "Reading the conversation…" with seconds elapsed, so a slow start doesn't look frozen. */
+function StatusLine({ text }: { text: string }) {
+  const c = useTheme<AppTheme>().appColors;
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSecs((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <View style={styles.status}>
+      <ActivityIndicator size={14} color={c.textSecondary} />
+      <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13, flexShrink: 1 }}>
+        {text}{secs >= 3 ? ` ${secs} s` : ''}
+      </Text>
+    </View>
+  );
+}
+
 export default React.memo(function MessageBubble({ message, isLast, isStreaming, stream, onCopy, onRegenerate, onContinue, onLongPress, onSwitchVersion }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
@@ -152,6 +170,7 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
             {(displayText.length > 0 || (isStreaming && !thinkingActive)) && (
               <Markdown content={displayText} streaming={isStreaming} onCopy={onCopy} />
             )}
+            {isStreaming && !!stream?.status && <StatusLine text={stream.status} />}
           </View>
         )}
       </View>
@@ -181,6 +200,7 @@ export default React.memo(function MessageBubble({ message, isLast, isStreaming,
 });
 
 const styles = StyleSheet.create({
+  status: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
   wrapper: { paddingHorizontal: spacing.md, marginBottom: spacing.xs },
   bubble: { padding: spacing.sm, paddingHorizontal: spacing.md },
   footer: { flexDirection: 'row', alignItems: 'center', paddingLeft: spacing.md, marginTop: 2 },

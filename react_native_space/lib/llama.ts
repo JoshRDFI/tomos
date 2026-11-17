@@ -64,7 +64,13 @@ export async function loadModelInfo(filePath: string): Promise<Record<string, an
 
 let _stopRef: { stop: boolean } = { stop: false };
 
+/** Generation milestones in logcat (tag ReactNativeJS), for diagnosing stalls. */
+function log(msg: string) {
+  console.log(`[gen] ${msg}`);
+}
+
 export function stopGeneration() {
+  log(`stop requested (running: ${!!_inflight})`);
   _stopRef.stop = true;
   // Actually interrupt native generation; the completion promise then resolves
   // promptly with what was produced so far.
@@ -172,10 +178,16 @@ export async function generate(
   let firstTokenAt: number | null = null;
   let answerAt: number | null = null;
   let last: StreamView = { thinking: '', answer: '', thinkingOpen: false };
+  const startedAt = Date.now();
+  let tokens = 0;
   const onData = (data: any) => {
     if (stopRef.stop) return;
     const now = Date.now();
-    if (firstTokenAt === null) firstTokenAt = now;
+    if (firstTokenAt === null) {
+      firstTokenAt = now;
+      log(`first token after ${now - startedAt} ms`);
+    }
+    if (++tokens % 200 === 0) log(`${tokens} tokens`);
     if (typeof data?.token === 'string') st.raw += data.token;
     // A continuation is a raw prompt; llama.rn has no chat parse for it.
     if (displayPrefix === null) {
@@ -231,14 +243,23 @@ export async function generate(
     request = { ...sampling, prompt, stop: [...stop, ...userStop] };
   }
 
+  log(`start: n_ctx=${nCtx} n_predict=${nPredict} prompt≈${fit.tokens} tokens, ${fitted.length} messages, dropped=${dropped}, continue=${!!prefill}`);
+  // Until the first token, llama.cpp is reading the prompt; on a long chat
+  // after a restart (nothing cached) that can take minutes on a phone.
+  onUpdate({ ...last, status: `Reading the conversation (about ${fit.tokens.toLocaleString()} tokens)…` });
   const run = ctx.completion(request, onData);
   _inflight = run;
   let result: any;
   try {
     result = await run;
+  } catch (e) {
+    log(`failed: ${String((e as any)?.message ?? e)}`);
+    throw e;
   } finally {
     _inflight = null;
   }
+  const t = result?.timings ?? {};
+  log(`end after ${Date.now() - startedAt} ms: stopped=${stopRef.stop} limit=${!!result?.stopped_limit} context_full=${!!result?.context_full} eos=${!!result?.stopped_eos} prompt_n=${t.prompt_n} prompt_ms=${Math.round(t.prompt_ms ?? 0)} predicted_n=${t.predicted_n} tok/s=${(t.predicted_per_second ?? 0).toFixed(1)}`);
 
   // When stopped, keep exactly what the user saw rather than the full native
   // result, which can include tokens produced after the stop request.
