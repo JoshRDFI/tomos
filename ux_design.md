@@ -510,4 +510,13 @@ In order (tracked in Archon):
 4. ~~Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages~~ (done, `feature/branching`)
 5. ~~Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix~~ (done, `feature/gguf-check`)
 6. ~~Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata~~ (done, `feature/continue-date-backup`)
+7. After import, offer to delete the original file (`feature/delete-original-after-import`, awaiting device test)
+8. (planned) Download models in the app from Hugging Face, straight into app storage
+9. (planned) Save and restore each chat's KV cache so long chats reopen without re-reading the history
+10. (planned) Search: scroll to and highlight the matched message
+11. (planned) Keep generating in the background (foreground service with a notification)
+12. (planned) Attach text and PDF files to a message
+13. (planned) Image input for vision models (mmproj)
+14. (planned) Voice input and read-aloud
+15. (planned) Auto-title chats; pin chats in the drawer
 </roadmap>
