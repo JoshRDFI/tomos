@@ -90,6 +90,7 @@ export default function RootLayout() {
               <Stack.Screen name="chat-settings" options={{ title: 'Chat settings' }} />
               <Stack.Screen name="search" options={{ headerShown: false }} />
               <Stack.Screen name="models" options={{ title: 'Models' }} />
+              <Stack.Screen name="download" options={{ title: 'Download from Hugging Face' }} />
               <Stack.Screen name="settings/index" options={{ title: 'Settings' }} />
               <Stack.Screen name="settings/presets" options={{ title: 'System Prompt Presets' }} />
               <Stack.Screen name="settings/model" options={{ title: 'Model settings' }} />

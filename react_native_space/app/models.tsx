@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView, Alert } from 'react-native';
-import { Text, Button, useTheme, Card, Chip, IconButton, Menu, Dialog, Portal, TextInput as PaperInput, ActivityIndicator, RadioButton, Snackbar } from 'react-native-paper';
-import { useRouter, Stack } from 'expo-router';
+import { Text, Button, useTheme, Card, Chip, IconButton, Menu, Dialog, Portal, TextInput as PaperInput, ActivityIndicator, RadioButton, Snackbar, ProgressBar } from 'react-native-paper';
+import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, fontFamilies, typeScale } from '@/constants/theme';
 import { useModelContext } from '@/contexts/ModelContext';
@@ -13,7 +13,30 @@ import { finishModel } from '@/lib/modelImport';
 import type { ModelRecord, TemplateKey } from '@/types';
 import { TEMPLATE_OPTIONS } from '@/types';
 import WebNotice from '@/components/WebNotice';
-import SpikeDownload from '@/components/SpikeDownload';
+import * as downloader from '@/lib/downloader';
+import type { DlInfo } from '@/lib/downloader';
+import { cancelDownload, retryFailed, syncDownloads } from '@/lib/downloads';
+import type { DownloadRecord } from '@/types';
+
+// DownloadManager PAUSED_* reasons.
+const PAUSED_QUEUED_FOR_WIFI = 3;
+
+function downloadProgress(d: DownloadRecord, infos: Map<number, DlInfo>) {
+  let done = 0;
+  let paused: number | null | undefined;
+  for (const p of d.parts) {
+    if (p.status === 'done') done += p.size;
+    else if (p.status === 'active') {
+      const i = infos.get(p.dmId);
+      done += i?.bytesSoFar ?? 0;
+      if (i?.status === 'paused') paused = i.reason;
+    }
+  }
+  let line: string | null = null;
+  if (d.status === 'failed') line = d.error ?? 'The download failed.';
+  else if (paused !== undefined) line = paused === PAUSED_QUEUED_FOR_WIFI ? 'Waiting for Wi-Fi' : 'Paused, retrying';
+  return { done: Math.min(done, d.totalBytes), line };
+}
 
 interface CompatWarning {
   name: string;
@@ -61,6 +84,9 @@ export default function ModelsScreen() {
   const [originalPrompt, setOriginalPrompt] = useState<{ name: string; uri: string; size: number } | null>(null);
   const [snack, setSnack] = useState('');
   const [loadingModelId, setLoadingModelId] = useState<string | null>(null);
+  const [downloads, setDownloads] = useState<DownloadRecord[]>([]);
+  const [dlInfos, setDlInfos] = useState<Map<number, DlInfo>>(new Map());
+  const canDownload = !isWeb && downloader.isSupported();
 
   const refresh = useCallback(async () => {
     if (isWeb) return;
@@ -86,6 +112,45 @@ export default function ModelsScreen() {
   }, [isWeb]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Hugging Face downloads: reconcile with DownloadManager on focus and every
+  // second while this screen is showing.
+  const pollDownloads = useCallback(async () => {
+    if (!canDownload) return;
+    try {
+      const { finished } = await syncDownloads();
+      if (finished.length > 0) {
+        refresh();
+        setSnack(finished.length === 1 ? 'Model downloaded' : `${finished.length} models downloaded`);
+      }
+      const list = await db.getActiveDownloads();
+      setDownloads(list);
+      const ids = list.flatMap((d) => d.parts.filter((p) => p.status === 'active').map((p) => p.dmId));
+      setDlInfos(new Map((ids.length ? await downloader.query(ids) : []).map((i) => [i.id, i])));
+    } catch (e) {
+      console.warn('Download sync failed', e);
+    }
+  }, [canDownload, refresh]);
+
+  useFocusEffect(useCallback(() => {
+    pollDownloads();
+    const t = setInterval(pollDownloads, 1000);
+    return () => clearInterval(t);
+  }, [pollDownloads]));
+
+  const onCancelDownload = useCallback(async (d: DownloadRecord) => {
+    await cancelDownload(d);
+    pollDownloads();
+  }, [pollDownloads]);
+
+  const onRetryDownload = useCallback(async (d: DownloadRecord) => {
+    try {
+      await retryFailed(d);
+    } catch (e) {
+      setSnack('Retry failed: ' + String((e as any)?.message ?? e));
+    }
+    pollDownloads();
+  }, [pollDownloads]);
 
   const addModel = useCallback(async () => {
     if (isWeb) return;
@@ -236,19 +301,28 @@ export default function ModelsScreen() {
     if (modelCtx.loadedModelId === deleteDialog.id) {
       await modelCtx.unload();
     }
-    // Delete file
+    // Delete the file; a downloaded model owns its whole models/<id>/ folder
+    // (split models have several parts there).
     if (Platform.OS !== 'web') {
       try {
-        const { File } = await import('expo-file-system');
-        const f = new File(deleteDialog.filePath);
-        if (f.exists) f.delete();
-      } catch {}
+        const { File, Directory } = await import('expo-file-system');
+        const extDir = canDownload ? `file://${downloader.externalModelsDir()}/` : null;
+        if (extDir && deleteDialog.filePath.startsWith(extDir)) {
+          const folder = new Directory(extDir + deleteDialog.filePath.slice(extDir.length).split('/')[0]);
+          if (folder.exists) folder.delete();
+        } else {
+          const f = new File(deleteDialog.filePath);
+          if (f.exists) f.delete();
+        }
+      } catch (e) {
+        console.warn('Deleting the model file failed', e);
+      }
     }
     await db.deleteModel(deleteDialog.id);
     setDeleteDialog(null);
     refresh();
     setSnack('Model removed');
-  }, [deleteDialog, modelCtx, refresh]);
+  }, [deleteDialog, modelCtx, refresh, canDownload]);
 
   const handleTemplateChange = useCallback(async () => {
     if (!templateDialog) return;
@@ -293,14 +367,46 @@ export default function ModelsScreen() {
         <Button mode="contained" icon="plus" onPress={addModel} loading={importing} disabled={importing} style={{ borderRadius: radii.button }}>
           {importing ? importMsg : 'Add GGUF model'}
         </Button>
-        <SpikeDownload />
+        {canDownload && (
+          <Button mode="outlined" icon="download" onPress={() => router.push('/download')} style={{ borderRadius: radii.button }}>
+            Download from Hugging Face
+          </Button>
+        )}
+
+        {/* Hugging Face downloads in progress or failed */}
+        {downloads.map((d) => {
+          const { done, line } = downloadProgress(d, dlInfos);
+          const failed = d.status === 'failed';
+          return (
+            <Card key={d.id} style={[styles.modelCard, { backgroundColor: c.surface, borderColor: failed ? c.error : c.hairline }]}>
+              <Card.Content style={{ gap: 8 }}>
+                <Text style={{ color: c.text, fontFamily: typeScale.title.fontFamily, fontSize: 16 }}>{d.label}</Text>
+                <ProgressBar progress={d.totalBytes > 0 ? done / d.totalBytes : 0} color={failed ? c.error : c.brand} />
+                <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.mono, fontSize: 12 }}>
+                  {formatBytes(done)} of {formatBytes(d.totalBytes)}{d.parts.length > 1 ? ` · ${d.parts.length} parts` : ''}
+                </Text>
+                {line && <Text style={{ color: failed ? c.error : c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>{line}</Text>}
+                <View style={[styles.actionRow, { justifyContent: 'flex-end', gap: 8 }]}>
+                  {failed ? (
+                    <>
+                      <Button compact onPress={() => onCancelDownload(d)} textColor={c.error}>Remove</Button>
+                      <Button compact mode="contained" onPress={() => onRetryDownload(d)}>Retry</Button>
+                    </>
+                  ) : (
+                    <Button compact onPress={() => onCancelDownload(d)}>Cancel</Button>
+                  )}
+                </View>
+              </Card.Content>
+            </Card>
+          );
+        })}
 
         {/* Models list */}
-        {models.length === 0 && !importing && (
+        {models.length === 0 && !importing && downloads.length === 0 && (
           <View style={[styles.emptyCard, { backgroundColor: c.brandTint }]}>
             <Text style={{ color: c.text, fontFamily: typeScale.title.fontFamily, fontSize: 16, textAlign: 'center' }}>No models yet</Text>
             <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 14, textAlign: 'center' }}>
-              Add a GGUF model file to get started.
+              {canDownload ? 'Add a GGUF model file or download one from Hugging Face.' : 'Add a GGUF model file to get started.'}
             </Text>
           </View>
         )}
