@@ -4,6 +4,8 @@ jest.mock('../lib/db', () => ({
   updateDownload: jest.fn(() => Promise.resolve()),
   getDownload: jest.fn(),
   getActiveDownloads: jest.fn(),
+  getModel: jest.fn(() => Promise.resolve(null)),
+  deleteDownload: jest.fn(() => Promise.resolve()),
 }));
 jest.mock('../lib/downloader', () => ({
   enqueue: jest.fn(),
@@ -20,7 +22,7 @@ jest.mock('expo-file-system', () => ({
 import * as db from '../lib/db';
 import * as downloader from '../lib/downloader';
 import { finishModel } from '../lib/modelImport';
-import { cancelDownload, failureText, reconcile, retryFailed, startDownload, syncDownloads } from '../lib/downloads';
+import { cancelDownload, failureText, reconcile, removeDownloadedModelFiles, retryFailed, startDownload, syncDownloads } from '../lib/downloads';
 import type { DownloadRecord } from '../types';
 import type { DlInfo } from '../lib/downloader';
 
@@ -33,6 +35,7 @@ const m = {
   query: downloader.query as jest.Mock,
   remove: downloader.remove as jest.Mock,
   finish: finishModel as jest.Mock,
+  getModel: db.getModel as jest.Mock,
 };
 
 const rec = (over: Partial<DownloadRecord> = {}): DownloadRecord => ({
@@ -172,8 +175,11 @@ describe('syncDownloads', () => {
       filePath: 'file:///ext/files/models/d1/part11.gguf',
       fileSizeBytes: 30,
       fileType: null,
+      requireMetadata: true,
     });
-    expect(m.update).toHaveBeenCalledWith('d1', expect.objectContaining({ status: 'done' }));
+    expect(m.update).toHaveBeenCalledWith('d1', expect.objectContaining({ status: 'done' }), 'active');
+    // The model row exists before the download is marked done.
+    expect(m.finish.mock.invocationCallOrder[0]).toBeLessThan(m.update.mock.invocationCallOrder[0]);
     expect(out.finished).toEqual([{ id: 'd1' }]);
   });
 
@@ -202,7 +208,11 @@ describe('syncDownloads', () => {
     const out = await syncDownloads();
     expect(m.remove).toHaveBeenCalledWith([11, 12]);
     expect(mockDirDelete).toHaveBeenCalledWith('file:///ext/files/models/d1');
-    expect(m.update).toHaveBeenLastCalledWith('d1', { status: 'failed', error: "This file isn't a readable GGUF model." });
+    expect(m.update).toHaveBeenLastCalledWith(
+      'd1',
+      { status: 'failed', error: "This file isn't a readable GGUF model.", parts: [expect.objectContaining({ status: 'failed' }), expect.objectContaining({ status: 'failed' })] },
+      'active'
+    );
     expect(out.failed).toHaveLength(1);
   });
 
@@ -210,5 +220,42 @@ describe('syncDownloads', () => {
     m.getActive.mockResolvedValue([rec({ status: 'failed' })]);
     await syncDownloads();
     expect(m.query).not.toHaveBeenCalled();
+  });
+  it('marks done without finishing again when the model row already exists (killed after finishing)', async () => {
+    m.getActive.mockResolvedValue([rec()]);
+    m.query.mockResolvedValue([info(11, 'succeeded'), info(12, 'succeeded')]);
+    m.getDownload.mockResolvedValue(rec());
+    m.getModel.mockResolvedValueOnce({ id: 'd1' });
+    await syncDownloads();
+    expect(m.finish).not.toHaveBeenCalled();
+    expect(m.update).toHaveBeenCalledWith('d1', expect.objectContaining({ status: 'done' }), 'active');
+  });
+
+  it('writes reconcile results only while the download is still active (Cancel may have won)', async () => {
+    m.getActive.mockResolvedValue([rec()]);
+    m.query.mockResolvedValue([info(11, 'missing'), info(12, 'missing')]);
+    await syncDownloads();
+    expect(m.update).toHaveBeenCalledWith('d1', expect.objectContaining({ status: 'failed' }), 'active');
+  });
+});
+
+describe('removeDownloadedModelFiles', () => {
+  it('deletes the models/<id> folder by id and drops the DownloadManager entries', async () => {
+    m.getDownload.mockResolvedValueOnce(rec({ status: 'done' }));
+    await expect(removeDownloadedModelFiles('d1')).resolves.toBe(true);
+    expect(mockDirDelete).toHaveBeenCalledWith('file:///ext/files/models/d1');
+    expect(m.remove).toHaveBeenCalledWith([11, 12]);
+    expect((db as any).deleteDownload).toHaveBeenCalledWith('d1');
+  });
+
+  it('leaves imported models (no download record) to the caller', async () => {
+    m.getDownload.mockResolvedValueOnce(null);
+    await expect(removeDownloadedModelFiles('imported1')).resolves.toBe(false);
+    expect(mockDirDelete).not.toHaveBeenCalled();
+  });
+
+  it('never deletes the whole models folder for an empty id', async () => {
+    await removeDownloadedModelFiles('');
+    expect(mockDirDelete).not.toHaveBeenCalled();
   });
 });

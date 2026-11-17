@@ -125,6 +125,8 @@ export async function retryFailed(d: DownloadRecord): Promise<void> {
 }
 
 function deleteFolder(id: string) {
+  // Never let an empty id resolve to the whole models folder.
+  if (!id || id.includes('/')) return;
   try {
     const { Directory } = require('expo-file-system') as typeof import('expo-file-system');
     const dir = new Directory(`file://${downloader.externalModelsDir()}/${id}`);
@@ -137,6 +139,21 @@ function deleteFolder(id: string) {
 async function removeFiles(d: DownloadRecord) {
   await downloader.remove(d.parts.map((p) => p.dmId)).catch(() => {});
   deleteFolder(d.id);
+}
+
+/**
+ * If this model was downloaded, remove its files: the whole models/<id>/
+ * folder (all parts) and its DownloadManager entries. Returns false for
+ * imported models (no download record), which the caller deletes itself.
+ */
+export async function removeDownloadedModelFiles(modelId: string): Promise<boolean> {
+  if (!modelId) return false;
+  const d = await db.getDownload(modelId);
+  if (!d) return false;
+  await downloader.remove(d.parts.map((p) => p.dmId)).catch(() => {});
+  deleteFolder(modelId);
+  await db.deleteDownload(modelId);
+  return true;
 }
 
 export async function cancelDownload(d: DownloadRecord): Promise<void> {
@@ -163,25 +180,34 @@ async function doSync() {
   for (const d of active) {
     for (const a of reconcile(d, infos)) {
       if (a.kind === 'update') {
-        await db.updateDownload(a.id, a.patch);
+        // Conditional: Cancel may have run since this sync read the list.
+        await db.updateDownload(a.id, a.patch, 'active');
         if (a.patch.status === 'failed') failed.push({ ...d, ...a.patch });
         continue;
       }
       // Re-read: another sync (or an earlier app session) may have finished it already.
       const current = await db.getDownload(d.id);
       if (current?.status !== 'active') continue;
-      await db.updateDownload(d.id, { status: 'done', parts: a.download.parts });
+      const done = { status: 'done' as const, parts: a.download.parts };
+      // The app was killed after creating the model but before marking this done.
+      if (await db.getModel(d.id)) {
+        await db.updateDownload(d.id, done, 'active');
+        continue;
+      }
       const first = infos.find((i) => i.id === d.parts[0].dmId);
       const path = first?.localPath ?? `${downloader.externalModelsDir()}/${d.id}/${basename(d.parts[0].path)}`;
       try {
-        finished.push(
-          await finishModel({ id: d.id, fileName: d.label, filePath: `file://${path}`, fileSizeBytes: d.totalBytes, fileType: null })
-        );
+        // Model row first, then "done": a kill in between is caught by the getModel check above,
+        // whereas "done" first would hide the files with no model and no card.
+        const model = await finishModel({ id: d.id, fileName: d.label, filePath: `file://${path}`, fileSizeBytes: d.totalBytes, fileType: null, requireMetadata: true });
+        await db.updateDownload(d.id, done, 'active');
+        finished.push(model);
       } catch (e) {
         console.warn('Finishing download failed', e);
         await removeFiles(d);
-        const patch = { status: 'failed' as const, error: UNREADABLE_TEXT };
-        await db.updateDownload(d.id, patch);
+        // Every part is gone, so Retry fetches them all again.
+        const patch = { status: 'failed' as const, error: UNREADABLE_TEXT, parts: d.parts.map((p) => ({ ...p, status: 'failed' as const })) };
+        await db.updateDownload(d.id, patch, 'active');
         failed.push({ ...d, ...patch });
       }
     }

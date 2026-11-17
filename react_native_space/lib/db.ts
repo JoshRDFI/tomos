@@ -277,7 +277,8 @@ export async function insertDownload(d: DownloadRecord): Promise<void> {
   );
 }
 
-export async function updateDownload(id: string, patch: Partial<DownloadRecord>): Promise<void> {
+/** With `onlyIfStatus`, the write applies only while the row still has that status. */
+export async function updateDownload(id: string, patch: Partial<DownloadRecord>, onlyIfStatus?: DownloadRecord['status']): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const keys = Object.keys(patch).filter((k) => k !== 'id');
@@ -286,7 +287,8 @@ export async function updateDownload(id: string, patch: Partial<DownloadRecord>)
     const v = (patch as any)[k];
     return k === 'parts' ? JSON.stringify(v) : k === 'wifiOnly' ? (v ? 1 : 0) : v;
   });
-  await db.runAsync(`UPDATE downloads SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...vals, id]);
+  const where = onlyIfStatus ? 'id = ? AND status = ?' : 'id = ?';
+  await db.runAsync(`UPDATE downloads SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE ${where}`, [...vals, id, ...(onlyIfStatus ? [onlyIfStatus] : [])]);
 }
 
 export async function getDownload(id: string): Promise<DownloadRecord | null> {

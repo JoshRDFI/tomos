@@ -15,7 +15,7 @@ import { TEMPLATE_OPTIONS } from '@/types';
 import WebNotice from '@/components/WebNotice';
 import * as downloader from '@/lib/downloader';
 import type { DlInfo } from '@/lib/downloader';
-import { cancelDownload, retryFailed, syncDownloads } from '@/lib/downloads';
+import { cancelDownload, removeDownloadedModelFiles, retryFailed, syncDownloads } from '@/lib/downloads';
 import type { DownloadRecord } from '@/types';
 
 // DownloadManager PAUSED_* reasons.
@@ -115,8 +115,12 @@ export default function ModelsScreen() {
 
   // Hugging Face downloads: reconcile with DownloadManager on focus and every
   // second while this screen is showing.
+  const polling = useRef(false);
   const pollDownloads = useCallback(async () => {
-    if (!canDownload) return;
+    // Skip a tick while the last one runs (finishing a large model takes seconds),
+    // so results don't arrive out of order or repeat the snackbar.
+    if (!canDownload || polling.current) return;
+    polling.current = true;
     try {
       const { finished } = await syncDownloads();
       if (finished.length > 0) {
@@ -129,6 +133,8 @@ export default function ModelsScreen() {
       setDlInfos(new Map((ids.length ? await downloader.query(ids) : []).map((i) => [i.id, i])));
     } catch (e) {
       console.warn('Download sync failed', e);
+    } finally {
+      polling.current = false;
     }
   }, [canDownload, refresh]);
 
@@ -305,12 +311,8 @@ export default function ModelsScreen() {
     // (split models have several parts there).
     if (Platform.OS !== 'web') {
       try {
-        const { File, Directory } = await import('expo-file-system');
-        const extDir = canDownload ? `file://${downloader.externalModelsDir()}/` : null;
-        if (extDir && deleteDialog.filePath.startsWith(extDir)) {
-          const folder = new Directory(extDir + deleteDialog.filePath.slice(extDir.length).split('/')[0]);
-          if (folder.exists) folder.delete();
-        } else {
+        const { File } = await import('expo-file-system');
+        if (!(canDownload && (await removeDownloadedModelFiles(deleteDialog.id)))) {
           const f = new File(deleteDialog.filePath);
           if (f.exists) f.delete();
         }

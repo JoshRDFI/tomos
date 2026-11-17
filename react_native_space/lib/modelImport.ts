@@ -14,6 +14,8 @@ export async function finishModel(o: {
   fileSizeBytes: number;
   /** Quant label from the GGUF header (general.file_type), if known. */
   fileType: string | null;
+  /** Fail (and save nothing) when the file's metadata can't be read. */
+  requireMetadata?: boolean;
 }): Promise<ModelRecord> {
   let displayName = o.fileName.replace(/\.gguf$/i, '');
   let architecture: string | null = null;
@@ -22,8 +24,9 @@ export async function finishModel(o: {
   let trainedContext: number | null = null;
   let fileParams: string | null = null;
 
+  let info: Record<string, any> | null = null;
   try {
-    const info = await llama.loadModelInfo(o.filePath);
+    info = await llama.loadModelInfo(o.filePath);
     if (info) {
       displayName = info['general.name'] ?? displayName;
       architecture = info['general.architecture'] ?? null;
@@ -38,6 +41,7 @@ export async function finishModel(o: {
     // Metadata is an enhancement; the model still loads without it.
     console.warn('Metadata read failed', e);
   }
+  if (o.requireMetadata && !info) throw new Error("This file isn't a readable GGUF model.");
 
   const model: ModelRecord = {
     id: o.id,

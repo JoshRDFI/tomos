@@ -47,4 +47,9 @@ describe('finishModel', () => {
     const m = await finishModel({ ...base, fileName: 'model.gguf', fileType: 'Q8_0' });
     expect(m.quantization).toBe('Q8_0');
   });
+  it('rejects without saving when metadata is required and the file is unreadable', async () => {
+    loadModelInfo.mockResolvedValue(null);
+    await expect(finishModel({ ...base, requireMetadata: true })).rejects.toThrow();
+    expect(insertModel).not.toHaveBeenCalled();
+  });
 });

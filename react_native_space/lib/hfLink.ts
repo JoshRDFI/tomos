@@ -13,13 +13,19 @@ const NAME_RE = /^[\w.-]+$/;
 
 export function parseHfLink(input: string): HfLink | null {
   const text = input.trim();
-  const url = text.match(URL_RE)?.[0];
+  // Sentence punctuation right after a pasted link isn't part of it.
+  const url = text.match(URL_RE)?.[0]?.replace(/[.,;:!?)\]]+$/, '');
   if (!url) {
     const parts = text.split('/');
     return parts.length === 2 && parts.every((p) => NAME_RE.test(p)) ? { repo: text, revision: null, file: null } : null;
   }
   const path = url.replace(/^(?:https?:\/\/)?(?:www\.)?[^/]+\//i, '').replace(/[?#].*$/, '');
-  const segs = path.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
+  let segs: string[];
+  try {
+    segs = path.split('/').filter(Boolean).map((s) => decodeURIComponent(s));
+  } catch {
+    return null; // malformed %-escape
+  }
   if (segs.length < 2 || NOT_REPOS.has(segs[0].toLowerCase()) || !NAME_RE.test(segs[0]) || !NAME_RE.test(segs[1])) return null;
   const repo = `${segs[0]}/${segs[1]}`;
   if (['tree', 'blob', 'resolve'].includes(segs[2]) && segs[3]) {

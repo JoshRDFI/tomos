@@ -26,4 +26,12 @@ describe('parseHfLink', () => {
     'rejects %p', (bad) => {
       expect(parseHfLink(bad)).toBeNull();
     });
+  it('drops sentence punctuation after a pasted link', () => {
+    expect(parseHfLink('Try this: https://huggingface.co/Qwen/Qwen3-8B.')).toEqual({ repo: 'Qwen/Qwen3-8B', revision: null, file: null });
+    expect(parseHfLink('(https://hf.co/unsloth/Qwen3-8B-GGUF),')?.repo).toBe('unsloth/Qwen3-8B-GGUF');
+  });
+
+  it('returns null instead of throwing on a malformed escape', () => {
+    expect(() => parseHfLink('https://huggingface.co/u/r/blob/main/a%zz.gguf')).not.toThrow();
+  });
 });
