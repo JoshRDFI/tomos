@@ -19,7 +19,7 @@ const sections = [
   {
     title: 'Where to find models',
     icon: 'magnify',
-    body: `Hugging Face is the main source \u2014 search for "GGUF" to find pre-quantized models.\n\nPopular uploaders: bartowski, TheBloke, lmstudio-community, unsloth.\n\nGood starters: Llama 3.1/3.2, Qwen 2.5, Gemma 2, Phi-3.5, Mistral 7B.`,
+    body: `Hugging Face is the main source \u2014 search for "GGUF" to find pre-quantized models.\n\nThe quickest way in: copy a model's link (from a post, or the model page), then Models → Download from Hugging Face. The link field fills in from the clipboard. Tap Find files and pick a file. Links to an original model (not a GGUF one) show its GGUF versions to choose from.\n\nAndroid downloads the file in the background with a notification, so you can leave the app. Wi-Fi only is on by default. If a download fails, the Models screen shows why, with Retry.\n\nDownloading is the only time the app goes online: it asks Hugging Face for the model's file list, the first few MB of the file you pick (to check its format), and the file itself. Nothing else leaves the phone. Models that need a Hugging Face login aren't supported yet; download those in a browser and use Add GGUF model.\n\nPopular uploaders: bartowski, TheBloke, lmstudio-community, unsloth.\n\nGood starters: Llama 3.1/3.2, Qwen 2.5, Gemma 2, Phi-3.5, Mistral 7B.`,
   },
   {
     title: 'Copying files to the phone',

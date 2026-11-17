@@ -317,6 +317,14 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 8. If metadata reading or anything else fails, delete the copy and show: "This file isn't a readable GGUF model."
 9. On success, dialog "Delete the original?" naming the file and its size: "Keep" / "Delete" (red; tapping outside = Keep). Delete removes the picked `content://` document through the new File API (`DocumentsContract.deleteDocument`). Snackbar "Model added. Original deleted." or, when the provider refuses, "Model added, but the original couldn't be deleted. Delete name in the Files app."
 
+**Secondary button "Download from Hugging Face"** (outlined, icon `download`, Android only) under Add: pushes the Download screen (4a).
+
+**Download cards** (above the model list, one per download in progress or failed; `downloads` table):
+- Label, progress bar (bytes across all parts), "1.2 GB of 4.9 GB · N parts".
+- Status line: "Waiting for Wi-Fi" (paused, queued for Wi-Fi), "Paused, retrying" (other pauses), or the failure in red ("Not enough storage", "The download was removed from Android's download list.", "This file isn't a readable GGUF model.", HTTP errors).
+- Actions: Cancel while running; Remove and Retry when failed. Retry re-queues only the failed parts, from zero.
+- The screen reconciles with DownloadManager on focus and every second while shown. When every part has finished, the model is created (same metadata steps as import) exactly once, the card disappears, and a snackbar says "Model downloaded".
+
 **Model list** (cards, one per model)
 - displayName (titleMedium).
 - Chips in mono: quant, parameter label, size (for example `4.92 GB`), architecture.
@@ -328,10 +336,20 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 - Actions:
   - Primary "Load", or a "Loaded" badge with a check when current. Loading shows an inline spinner and "Loading…".
   - Overflow menu: "Settings…" (pushes that model's settings page), "Chat template…" (radio dialog: Auto, ChatML, Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca, Raw/none), "Rename", "Remove".
-  - Remove: confirm "Remove model and delete its file from app storage?" This unloads it if loaded, deletes the file, deletes the row, and sessions using it get modelId null.
+  - Remove: confirm "Remove model and delete its file from app storage?" This unloads it if loaded, deletes the file (for a downloaded model, its whole `models/<id>/` folder, all parts), deletes the row, and sessions using it get modelId null.
 - Load: if no session is generating, load the model and set it as the active session's model.
 
 **States:** an empty state matching the Chat no-model card; an error band for load failures with Retry.
+
+### 4a. Download from Hugging Face (app/download.tsx)
+Stack header: "Download from Hugging Face". Android only.
+
+1. Link field, prefilled from the clipboard when it holds a Hugging Face link (`parseHfLink`: model card, file page, resolve link, `hf.co`, bare `owner/repo`, or post text containing a link; query and fragment ignored). Button "Find files". No network until it's tapped.
+2. Looks up the repo (`/api/models/<repo>?blobs=true`). Errors: "No public model at <repo>. Check the link." (missing or private); gated: "This model needs a Hugging Face login, which the app doesn't support yet. Download it in a browser and use Add GGUF model."; "Couldn't reach Hugging Face." with Retry.
+3. **File list** when the repo has GGUF files: one card per file, split sets (`-0000N-of-0000M`) as one row, `mmproj` files hidden, smallest first. Chips: quant, size, "N parts", the RAM hint (same as model cards), "Needs PrismML llama.cpp" for PQ2_0/PTQ1_0. A link naming a file highlights and scrolls to its row.
+4. **GGUF versions** when it has none: "No GGUF files here. GGUF versions of <repo>:" then repos quantized from it, by downloads (id, downloads, likes); tapping one loads it. None: "No GGUF versions found on Hugging Face."
+5. Tapping a file: free-space check (size + 500 MB) → "Not enough storage (needs X GB)."; then the GGUF header check over HTTP range requests ("Checking <label>…"): not a GGUF → "Can't download <label>: reason."; unsupported formats or PrismML → "This model may not load" with "Download anyway" / "Cancel".
+6. Confirm dialog "Download <label>?": "<size>. Android downloads it in the background, with a notification. You can leave the app." and a "Wi-Fi only" switch (on by default; can't be changed after starting). Download → back to Models, where the card appears.
 
 ### 5. Settings (app/settings/index.tsx)
 Reached from the drawer's "Settings" row. One scrolling page:
@@ -511,7 +529,7 @@ In order (tracked in Archon):
 5. ~~Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix~~ (done, `feature/gguf-check`)
 6. ~~Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata~~ (done, `feature/continue-date-backup`)
 7. After import, offer to delete the original file (`feature/delete-original-after-import`, awaiting device test)
-8. (planned) Download models in the app from Hugging Face, straight into app storage
+8. ~~Download models in the app from Hugging Face, straight into app storage~~ (done, `feature/hf-download`, awaiting device test)
 9. (planned) Save and restore each chat's KV cache so long chats reopen without re-reading the history
 10. (planned) Search: scroll to and highlight the matched message
 11. (planned) Keep generating in the background (foreground service with a notification)

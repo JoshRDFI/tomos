@@ -1,6 +1,6 @@
 # LLM Chat — Architecture
 
-An offline Android app that runs GGUF language models on the phone with llama.cpp (via `llama.rn`). There is no backend, account or network call. The app is Expo SDK 54 / React Native 0.81 and lives in `react_native_space/`.
+An offline Android app that runs GGUF language models on the phone with llama.cpp (via `llama.rn`). There is no backend or account. The only network use is downloading a model from Hugging Face when the user asks for one (see "Hugging Face downloads"). The app is Expo SDK 54 / React Native 0.81 and lives in `react_native_space/`.
 
 For screens, layouts and visual design, see [`ux_design.md`](ux_design.md). This file covers how the code is put together and the rules to follow when changing it.
 
@@ -28,7 +28,8 @@ react_native_space/
     index.tsx             chat screen; owns the left drawer and the reply pipeline
     chat-settings.tsx     per-chat system prompt and settings layer
     search.tsx            FTS search across chats
-    models.tsx            model library: import, load, template, rename, remove
+    models.tsx            model library: import, load, template, rename, remove; download cards
+    download.tsx          Hugging Face link → file list → start a download
     help.tsx
     settings/index.tsx    appearance, system prompt, settings for all chats, per-model list, About
     settings/model.tsx    one model: file recommendations + its own settings layer
@@ -55,9 +56,15 @@ react_native_space/
     gguf.ts               quant/size parsing from file names
     ggufHeader.ts         GGUF header reader; checkCompatibility() against the bundled ggml types
     fts.ts                buildFtsQuery(): safe FTS5 MATCH strings
+    modelImport.ts        finishModel(): metadata + DB row for a GGUF in app storage (import and download)
+    hfLink.ts             parseHfLink(): pasted text → repo / revision / file
+    hfApi.ts              Hub API: repo files, GGUF versions of a base model, ggufRows(), range reads
+    downloader.ts         the only entry point to the download backend (modules/hf-download)
+    downloads.ts          start / retry / cancel, reconcile with DownloadManager, finish as models
     thinking.ts           splitThinking(): separate <think> blocks from the answer
     markdown.ts           toMdAst(): markdown + GFM → mdast (ported from DeepSeek's demo, MIT)
     highlight.ts          Prism languages/aliases; highlightCode() → flat styled runs
+  modules/hf-download/    local Expo module (Kotlin): Android DownloadManager enqueue/query/remove
   constants/theme.ts      tokens, type scale, spacing, radii (no inline hex elsewhere)
   constants/licenses.json generated; see "Licenses"
   scripts/generate-licenses.mjs
@@ -73,12 +80,25 @@ All state is in SQLite, opened through `lib/sqliteLoader`. Tables:
 - `sessions`: chats, including `systemPromptOverride` and `paramsOverride` (this chat's settings)
 - `messages`, with `messages_fts` (FTS5) kept in sync by triggers. Messages form a tree (`lib/branches.ts`): `parentId` links each message to the one it follows, and the parent's `selectedChildId` (or `sessions.rootMessageId` for first messages) picks the version shown. `getSessionMessages()` returns the visible path with `versions` on messages that have siblings. Edit and regenerate insert a sibling; nothing is deleted. Chats from before branching were linked into a single branch by a one-time migration.
 - `prompt_presets`
+- `downloads`: Hugging Face downloads (repo, pinned revision, parts as JSON with their DownloadManager ids and status, Wi-Fi only, error). Not in backups.
 
-Backups (`Settings → Backup`) are a JSON dump of every table except model files; restore replaces chats, presets and settings in one transaction and inserts only columns the current schema has, so older backups restore into newer schemas.
+Backups (`Settings → Backup`) are a JSON dump of every table except `downloads` (and model files); restore replaces chats, presets and settings in one transaction and inserts only columns the current schema has, so older backups restore into newer schemas.
 
 Migrations are additive and run at startup in `lib/db.ts` (`PRAGMA table_info` then `ALTER TABLE ADD COLUMN`); `getDb()` resolves only after they finish. Never rewrite or drop existing columns; installed copies carry old data.
 
 Model files are copied into `documentDirectory/models/` on import (legacy `copyAsync`: the picker returns `content://` URIs, which the new File API can't copy). The app never reads a model from its original location; after a successful import it offers to delete the picked original (`new File(contentUri).delete()`, which goes through `DocumentsContract.deleteDocument`; the legacy `deleteAsync` only accepts `com.android.externalstorage` URIs, so it can't delete from the Downloads provider). Before or right after the copy, `lib/ggufHeader.ts` reads the GGUF header and flags tensor types missing from the bundled llama.cpp. Its type tables mirror `ggml.h`/`llama.h` of the pinned llama.rn; update them when upgrading llama.rn.
+
+
+## Hugging Face downloads
+
+- **Network.** Only on explicit user action, anonymous, to `huggingface.co`:
+  - `GET /api/models/<repo>?blobs=true` → `{id, sha, gated, siblings[{rfilename, size}]}`. Missing and private repos both return 401; gated repos return 200 with `gated: "auto"|"manual"`, so the app checks that field.
+  - `GET /api/models?filter=base_model:quantized:<repo>&filter=gguf&sort=downloads&direction=-1&limit=20` for an original model's GGUF versions.
+  - `GET /<repo>/resolve/<sha>/<path>` (302 to the CDN, supports `Range`). Files are fetched by the repo `sha`, not `main`, so every part of a split model comes from one revision. The header check reads the first MB or so with range requests.
+- **Native module** `modules/hf-download` (Expo Modules, Kotlin; `android/` is generated, so native code lives only here). It wraps `DownloadManager`: `enqueue` (`setDestinationInExternalFilesDir`, `setAllowedOverMetered(!wifiOnly)`, visible notification), `query` (status, bytes, reason, local path; ids Android no longer knows come back as `missing`), `remove`. No storage permission is needed.
+- **Files** go to `getExternalFilesDir(null)/models/<download id>/<basename>` (`Android/data/<package>/files/models/…`), one folder per model so split parts sit together and llama.cpp finds them from the first part. The download id becomes the model id. Removing the model deletes the folder. Imported models stay in `documentDirectory/models/`.
+- **Reconciliation** (`lib/downloads.ts`): the Models screen calls `syncDownloads()` on focus and every second. It queries DownloadManager for active downloads, marks parts done or failed (`reconcile()`, pure and tested), and finishes a download once every part is done: claim it (`status = 'done'`) after re-reading the row, then `finishModel()`. Concurrent calls share one run, so focus firing twice can't create two models. Downloads that finish while the app is closed are picked up next time Models opens.
+- Retry re-enqueues failed parts from zero after removing their old DownloadManager entries; finished parts are kept.
 
 ## Model settings
 
