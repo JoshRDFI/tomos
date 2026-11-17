@@ -151,7 +151,7 @@ export default function DownloadScreen() {
   }, [view]);
 
   const chip = (label: string, color = c.textSecondary, outline = false) => (
-    <Chip compact style={[styles.chip, outline && { borderColor: color, borderWidth: 1, backgroundColor: 'transparent' }]} textStyle={{ fontSize: 11, fontFamily: fontFamilies.mono, color }}>{label}</Chip>
+    <Chip compact style={[styles.chip, outline && { borderColor: color, borderWidth: 1, backgroundColor: 'transparent' }]} textStyle={[styles.chipText, { fontFamily: fontFamilies.mono, color }]}>{label}</Chip>
   );
 
   return (
@@ -293,7 +293,9 @@ const styles = StyleSheet.create({
   notice: { padding: 16, borderRadius: radii.card, gap: 8 },
   row: { borderRadius: radii.card },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { borderRadius: 8, height: 26 },
+  chip: { borderRadius: 8 },
+  // Paper's MD3 chip label has lineHeight 24 + 6px margins; shrink both so small chips don't clip.
+  chipText: { fontSize: 11, lineHeight: 16, marginVertical: 3 },
   checking: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 });

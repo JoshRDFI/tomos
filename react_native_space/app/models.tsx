@@ -436,7 +436,7 @@ export default function ModelsScreen() {
                     : TEMPLATE_OPTIONS.find((t) => t.key === model.templateOverride)?.label ?? model.templateOverride}
                 </Text>
                 {totalRam > 0 && (
-                  <Chip compact style={[styles.hintChip, { borderColor: hintColor }]} textStyle={{ color: hintColor, fontFamily: fontFamilies.mono, fontSize: 11 }}>{hintLabel}</Chip>
+                  <Chip compact style={[styles.hintChip, { borderColor: hintColor }]} textStyle={[styles.metaChipText, { color: hintColor, fontFamily: fontFamilies.mono }]}>{hintLabel}</Chip>
                 )}
                 <View style={styles.actionRow}>
                   {isLoaded ? (
@@ -552,8 +552,9 @@ const styles = StyleSheet.create({
   emptyCard: { padding: 24, borderRadius: radii.card, alignItems: 'center', gap: 8 },
   modelCard: { borderRadius: radii.card, borderWidth: StyleSheet.hairlineWidth },
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  metaChip: { borderRadius: 8, height: 26 },
-  metaChipText: { fontSize: 11 },
+  metaChip: { borderRadius: 8 },
+  // Paper's MD3 chip label has lineHeight 24 + 6px margins; shrink both so small chips don't clip.
+  metaChipText: { fontSize: 11, lineHeight: 16, marginVertical: 3 },
   hintChip: { alignSelf: 'flex-start', borderRadius: 8, borderWidth: 1, backgroundColor: 'transparent' },
   actionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 });
