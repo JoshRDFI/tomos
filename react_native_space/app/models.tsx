@@ -8,9 +8,8 @@ import { useModelContext } from '@/contexts/ModelContext';
 import * as db from '@/lib/db';
 import { parseQuantFromFilename, formatBytes, memoryHint, isPrismOnlyQuant } from '@/lib/gguf';
 import { base64ToBytes, checkCompatibility, GgufError, readGgufHeader, type CompatibilityReport } from '@/lib/ggufHeader';
-import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
-import { extractFileParams } from '@/lib/params';
+import { finishModel } from '@/lib/modelImport';
 import type { ModelRecord, TemplateKey } from '@/types';
 import { TEMPLATE_OPTIONS } from '@/types';
 import WebNotice from '@/components/WebNotice';
@@ -184,50 +183,7 @@ export default function ModelsScreen() {
 
       const fileSize = asset.size || dest.size || 0;
 
-      // Read metadata
-      let displayName = name.replace(/\.gguf$/i, '');
-      let architecture: string | null = null;
-      let parameterLabel: string | null = null;
-      let detectedTemplate: string | null = null;
-      let trainedContext: number | null = null;
-      let fileParams: string | null = null;
-
-      try {
-        const info = await llama.loadModelInfo(dest.uri);
-        if (info) {
-          displayName = (info as any)?.['general.name'] ?? displayName;
-          architecture = (info as any)?.['general.architecture'] ?? null;
-          parameterLabel = (info as any)?.['general.size_label'] ?? null;
-          if ((info as any)?.['tokenizer.chat_template']) detectedTemplate = 'auto-available';
-          const arch = architecture?.toLowerCase?.() ?? '';
-          const ctxLen = Number((info as any)?.[`${arch}.context_length`]);
-          trainedContext = Number.isFinite(ctxLen) && ctxLen > 0 ? ctxLen : null;
-          fileParams = JSON.stringify(extractFileParams(info as Record<string, unknown>));
-        }
-      } catch (e) {
-        console.warn('Metadata read failed', e);
-        // Don't block import; metadata is optional enhancement
-      }
-
-      const quant = nameQuant ?? report?.fileType ?? null;
-
-      const model: ModelRecord = {
-        id,
-        displayName,
-        fileName: name,
-        filePath: dest.uri,
-        fileSizeBytes: fileSize,
-        quantization: quant,
-        architecture,
-        parameterLabel,
-        detectedTemplate,
-        templateOverride: 'auto',
-        trainedContext,
-        addedAt: Date.now(),
-        fileParams,
-        paramsOverride: null,
-      };
-      await db.insertModel(model);
+      await finishModel({ id, fileName: name, filePath: dest.uri, fileSizeBytes: fileSize, fileType: report?.fileType ?? null });
       copiedFile = null; // owned by the model record now
       setImporting(false);
       setImportMsg('');
