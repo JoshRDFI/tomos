@@ -10,7 +10,7 @@
  */
 
 export const BACKUP_FORMAT = 'llmchat-backup';
-export const BACKUP_VERSION = 1;
+export const BACKUP_VERSION = 2;
 
 type Row = Record<string, unknown>;
 

@@ -68,3 +68,15 @@ describe('restore helpers', () => {
     expect(backupFileName(new Date(2026, 0, 5))).toBe('llmchat-backup-2026-01-05.json');
   });
 });
+
+describe('backup versions', () => {
+  it('accepts a version-1 backup', () => {
+    expect(parseBackup(JSON.stringify({ ...valid(), version: 1 })).version).toBe(1);
+  });
+  it('accepts version 2', () => {
+    expect(parseBackup(JSON.stringify({ ...valid(), version: 2 })).version).toBe(2);
+  });
+  it('rejects version 3 as newer', () => {
+    expect(() => parseBackup(JSON.stringify({ ...valid(), version: 3 }))).toThrow('newer version');
+  });
+});

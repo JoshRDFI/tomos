@@ -53,7 +53,7 @@ export default function ChatSettingsScreen() {
         file: parseParamSet(model?.fileParams),
         model: parseParamSet(model?.paramsOverride),
       }));
-      const p = await db.getAllPresets();
+      const p = await db.getAllPersonas();
       setPresets(p);
     })();
   }, [isWeb, sessionId]);
@@ -103,14 +103,14 @@ export default function ChatSettingsScreen() {
 
   const savePreset = async () => {
     if (!saveName.trim()) { setSaveError('Name is required'); return; }
-    const exists = await db.presetNameExists(saveName.trim());
+    const exists = await db.personaNameExists(saveName.trim());
     if (exists) { setSaveError('A preset with this name already exists'); return; }
-    await db.insertPreset(blankPersona({ id: db.generateId(), name: saveName.trim(), content: promptText, createdAt: Date.now() }));
+    await db.insertPersona(blankPersona({ id: db.generateId(), name: saveName.trim(), content: promptText, createdAt: Date.now() }));
     setSaveDialog(false);
     setSaveName('');
     setSaveError('');
     setSnack('Preset saved');
-    const p = await db.getAllPresets();
+    const p = await db.getAllPersonas();
     setPresets(p);
   };
 

@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
-import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, Persona, SearchResult } from '@/types';
+import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, Persona, PersonaExample, SearchResult } from '@/types';
+import { completionParamsOnly, isChatEmpty, linkExactCopies, pickDefaultPersona, resolveInstructions } from './personas';
+import { composeSystemMessage } from './prompt';
 import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
@@ -125,6 +127,13 @@ async function createTables() {
   if (!msgCols.includes('reasoning')) await db.execAsync('ALTER TABLE messages ADD COLUMN reasoning TEXT');
   if (!msgCols.includes('thinkingMs')) await db.execAsync('ALTER TABLE messages ADD COLUMN thinkingMs INTEGER');
   if (!msgCols.includes('parentId')) await migrateToBranches(db);
+  if (!msgCols.includes('kind')) await db.execAsync('ALTER TABLE messages ADD COLUMN kind TEXT');
+  const presetCols = ((await db.getAllAsync('PRAGMA table_info(prompt_presets)')) as { name: string }[]).map((c) => c.name);
+  for (const [col, type] of [['greeting', 'TEXT'], ['examples', 'TEXT'], ['params', 'TEXT'], ['updatedAt', 'INTEGER']] as const) {
+    if (!presetCols.includes(col)) await db.execAsync(`ALTER TABLE prompt_presets ADD COLUMN ${col} ${type}`);
+  }
+  const sessionCols = ((await db.getAllAsync('PRAGMA table_info(sessions)')) as { name: string }[]).map((c) => c.name);
+  if (!sessionCols.includes('personaId')) await migrateToPersonas(db);
 
   // FTS triggers
   await db.execAsync(`
@@ -139,6 +148,26 @@ async function createTables() {
       INSERT INTO messages_fts(content, sessionId, messageId) VALUES (new.content, new.sessionId, new.id);
     END;
   `);
+}
+
+/**
+ * Presets become personas. Chats (and the default prompt) whose text is an
+ * exact copy of a preset are linked to it; the text the model sees is the same.
+ */
+async function migrateToPersonas(db: any) {
+  await db.withExclusiveTransactionAsync(async (tx: any) => {
+    await tx.execAsync('ALTER TABLE sessions ADD COLUMN personaId TEXT');
+    const presets = (await tx.getAllAsync('SELECT id, content, createdAt FROM prompt_presets')) as { id: string; content: string; createdAt: number }[];
+    const sessions = (await tx.getAllAsync('SELECT id, systemPromptOverride FROM sessions')) as { id: string; systemPromptOverride: string | null }[];
+    const def = (await tx.getFirstAsync("SELECT value FROM settings WHERE key = 'defaultSystemPrompt'")) as { value: string | null } | null;
+    const links = linkExactCopies(presets, sessions, def?.value ?? null);
+    for (const l of links.sessionLinks) {
+      await tx.runAsync('UPDATE sessions SET personaId = ?, systemPromptOverride = NULL WHERE id = ?', [l.personaId, l.sessionId]);
+    }
+    if (links.defaultPersonaId) {
+      await tx.runAsync("INSERT OR REPLACE INTO settings (key, value) VALUES ('defaultPersonaId', ?)", [links.defaultPersonaId]);
+    }
+  });
 }
 
 /**
@@ -207,18 +236,40 @@ export async function setGlobalParams(set: ParamSet): Promise<void> {
  * app defaults < all chats < model file < this model < this chat.
  */
 export async function getEffectiveParams(session: SessionRecord | null, model: ModelRecord | null): Promise<ResolvedParams> {
+  const source = resolveInstructions(session, session?.personaId ? await getAllPersonas() : [], '');
   return resolveParams({
     global: await getGlobalParams(),
     file: parseParamSet(model?.fileParams),
     model: parseParamSet(model?.paramsOverride),
+    persona: source.kind === 'persona' ? completionParamsOnly(source.persona.params) : undefined,
     chat: parseParamSet(session?.paramsOverride),
+  });
+}
+
+const DEFAULT_SYSTEM_PROMPT = 'You are a helpful, concise assistant.';
+
+/**
+ * The system message for a chat at `path`: its instructions (custom, persona
+ * or default), the date, the persona's examples. Every request for this chat
+ * builds it here, so the chat and its summaries share a prompt prefix.
+ */
+export async function buildSystemMessage(session: SessionRecord | null, path: MessageRecord[]): Promise<string> {
+  void path;
+  const source = resolveInstructions(session, await getAllPersonas(), (await getSetting('defaultSystemPrompt')) ?? DEFAULT_SYSTEM_PROMPT);
+  const instructions = source.kind === 'persona' ? source.persona.content : source.text;
+  return composeSystemMessage({
+    instructions,
+    date: (await getSetting('includeDate')) !== '0' ? new Date() : null,
+    examples: source.kind === 'persona' ? source.persona.examples : [],
+    summary: null,
+    carryOver: null,
   });
 }
 
 export async function getEffectiveSystemPrompt(session: SessionRecord | null): Promise<string> {
   if (session?.systemPromptOverride != null) return session.systemPromptOverride;
   const v = await getSetting('defaultSystemPrompt');
-  return v ?? 'You are a helpful, concise assistant.';
+  return v ?? DEFAULT_SYSTEM_PROMPT;
 }
 
 // ── Models ──
@@ -326,25 +377,83 @@ export async function getSession(id: string): Promise<SessionRecord | null> {
   return ((await db.getFirstAsync('SELECT * FROM sessions WHERE id = ?', [id])) as SessionRecord) ?? null;
 }
 
-export async function createSession(modelId: string | null): Promise<SessionRecord> {
+/**
+ * A new chat. Without `opts.personaId` it starts with the default persona from
+ * Settings (applied now, so changing the default later leaves it alone), and
+ * with that persona's greeting.
+ */
+export async function createSession(modelId: string | null, opts?: { personaId?: string | null }): Promise<SessionRecord> {
   const db = await getDb();
   const now = Date.now();
+  const personas = await getAllPersonas();
+  const persona = opts?.personaId !== undefined
+    ? (opts.personaId ? (personas.find((p) => p.id === opts.personaId) ?? null) : null)
+    : pickDefaultPersona(await getSetting('defaultPersonaId'), personas);
   const s: SessionRecord = {
     id: uuid(),
     title: 'New chat',
     modelId,
     systemPromptOverride: null,
     paramsOverride: null,
+    personaId: persona?.id ?? null,
     createdAt: now,
     updatedAt: now,
   };
   if (db) {
     await db.runAsync(
-      'INSERT INTO sessions (id, title, modelId, systemPromptOverride, paramsOverride, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [s.id, s.title, s.modelId, s.systemPromptOverride, s.paramsOverride, s.createdAt, s.updatedAt]
+      'INSERT INTO sessions (id, title, modelId, systemPromptOverride, paramsOverride, personaId, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      [s.id, s.title, s.modelId, s.systemPromptOverride, s.paramsOverride, s.personaId, s.createdAt, s.updatedAt]
     );
+    if (persona?.greeting) await insertGreeting(s.id, persona);
   }
   return s;
+}
+
+async function insertGreeting(sessionId: string, persona: Persona): Promise<void> {
+  if (!persona.greeting) return;
+  await insertMessage({
+    id: uuid(),
+    sessionId,
+    role: 'assistant',
+    content: persona.greeting,
+    modelName: persona.name,
+    tokenCount: null,
+    tokensPerSec: null,
+    stopped: 0,
+    createdAt: Date.now(),
+    parentId: null,
+    kind: 'greeting',
+  });
+}
+
+export type PersonaChoice = { kind: 'none' } | { kind: 'persona'; id: string } | { kind: 'custom'; text: string };
+
+/** The choice a session currently represents. */
+export function personaChoiceOf(session: Pick<SessionRecord, 'systemPromptOverride' | 'personaId'> | null): PersonaChoice {
+  if (session?.systemPromptOverride != null) return { kind: 'custom', text: session.systemPromptOverride };
+  if (session?.personaId) return { kind: 'persona', id: session.personaId };
+  return { kind: 'none' };
+}
+
+/**
+ * Change what a chat's instructions come from. While the user hasn't sent
+ * anything yet, the greeting follows the persona.
+ */
+export async function setSessionPersona(sessionId: string, choice: PersonaChoice): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  const fields: Partial<SessionRecord> =
+    choice.kind === 'persona' ? { personaId: choice.id, systemPromptOverride: null }
+    : choice.kind === 'custom' ? { personaId: null, systemPromptOverride: choice.text }
+    : { personaId: null, systemPromptOverride: null };
+  await updateSession(sessionId, fields);
+  if (!isChatEmpty(await getSessionMessages(sessionId))) return;
+  await db.runAsync("DELETE FROM messages WHERE sessionId = ? AND kind = 'greeting'", [sessionId]);
+  await db.runAsync('UPDATE sessions SET rootMessageId = NULL WHERE id = ?', [sessionId]);
+  if (choice.kind === 'persona') {
+    const persona = await getPersona(choice.id);
+    if (persona) await insertGreeting(sessionId, persona);
+  }
 }
 
 export async function updateSession(id: string, fields: Partial<SessionRecord>): Promise<void> {
@@ -409,8 +518,8 @@ export async function insertMessage(m: MessageRecord): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.runAsync(
-    'INSERT INTO messages (id, sessionId, role, content, modelName, tokenCount, tokensPerSec, stopped, createdAt, reasoning, thinkingMs, parentId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [m.id, m.sessionId, m.role, m.content, m.modelName, m.tokenCount, m.tokensPerSec, m.stopped, m.createdAt, m.reasoning ?? null, m.thinkingMs ?? null, m.parentId ?? null]
+    'INSERT INTO messages (id, sessionId, role, content, modelName, tokenCount, tokensPerSec, stopped, createdAt, reasoning, thinkingMs, parentId, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [m.id, m.sessionId, m.role, m.content, m.modelName, m.tokenCount, m.tokensPerSec, m.stopped, m.createdAt, m.reasoning ?? null, m.thinkingMs ?? null, m.parentId ?? null, m.kind ?? null]
   );
   await selectMessage(m);
 }
@@ -430,6 +539,13 @@ export async function deleteMessage(id: string): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.runAsync('DELETE FROM messages WHERE id = ?', [id]);
+}
+
+export async function countUserMessages(sessionId: string): Promise<number> {
+  const db = await getDb();
+  if (!db) return 0;
+  const row = await db.getFirstAsync("SELECT COUNT(*) as cnt FROM messages WHERE sessionId = ? AND role = 'user'", [sessionId]);
+  return (row as any)?.cnt ?? 0;
 }
 
 export async function getSessionMessageCount(sessionId: string): Promise<number> {
@@ -459,38 +575,80 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
   return (rows ?? []) as SearchResult[];
 }
 
-// ── Presets ──
+// ── Personas (stored in prompt_presets) ──
 
-export async function getAllPresets(): Promise<Persona[]> {
+function parseJson<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== 'string' || !raw) return fallback;
+  try {
+    return (JSON.parse(raw) as T) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function rowToPersona(r: any): Persona {
+  const examples = parseJson<PersonaExample[]>(r.examples, []);
+  return {
+    id: r.id,
+    name: r.name,
+    content: r.content ?? '',
+    greeting: r.greeting || null,
+    examples: Array.isArray(examples) ? examples.filter((e) => e && typeof e.user === 'string' && typeof e.assistant === 'string') : [],
+    params: completionParamsOnly(parseJson<ParamSet>(r.params, {})),
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt ?? r.createdAt,
+  };
+}
+
+function personaColumns(p: Partial<Persona>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(p)) {
+    if (k === 'id') continue;
+    if (k === 'examples') out.examples = JSON.stringify(v ?? []);
+    else if (k === 'params') out.params = serializeParamSet(completionParamsOnly((v ?? {}) as ParamSet));
+    else out[k] = v ?? null;
+  }
+  return out;
+}
+
+export async function getAllPersonas(): Promise<Persona[]> {
   const db = await getDb();
   if (!db) return [];
-  const rows = (await db.getAllAsync('SELECT * FROM prompt_presets ORDER BY createdAt DESC')) as any[];
-  return rows.map((r) => ({ greeting: null, examples: [], params: {}, updatedAt: r.createdAt, ...r }));
+  return ((await db.getAllAsync('SELECT * FROM prompt_presets ORDER BY createdAt DESC')) as any[]).map(rowToPersona);
 }
 
-export async function insertPreset(p: Persona): Promise<void> {
+export async function getPersona(id: string): Promise<Persona | null> {
   const db = await getDb();
-  if (!db) return;
-  await db.runAsync('INSERT INTO prompt_presets (id, name, content, createdAt) VALUES (?, ?, ?, ?)', [p.id, p.name, p.content, p.createdAt]);
+  if (!db) return null;
+  const row = await db.getFirstAsync('SELECT * FROM prompt_presets WHERE id = ?', [id]);
+  return row ? rowToPersona(row) : null;
 }
 
-export async function updatePreset(id: string, fields: Partial<Persona>): Promise<void> {
+export async function insertPersona(p: Persona): Promise<void> {
   const db = await getDb();
   if (!db) return;
-  const keys = Object.keys(fields).filter((k) => k !== 'id');
-  if (keys.length === 0) return;
-  const sets = keys.map((k) => `${k} = ?`).join(', ');
-  const vals = keys.map((k) => (fields as any)[k]);
-  await db.runAsync(`UPDATE prompt_presets SET ${sets} WHERE id = ?`, [...vals, id]);
+  const cols = { id: p.id, ...personaColumns(p) };
+  const keys = Object.keys(cols);
+  await db.runAsync(`INSERT INTO prompt_presets (${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`, Object.values(cols) as any[]);
 }
 
-export async function deletePreset(id: string): Promise<void> {
+export async function updatePersona(id: string, fields: Partial<Persona>): Promise<void> {
   const db = await getDb();
   if (!db) return;
+  const cols = personaColumns({ ...fields, updatedAt: Date.now() });
+  const keys = Object.keys(cols);
+  await db.runAsync(`UPDATE prompt_presets SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`, [...(Object.values(cols) as any[]), id]);
+}
+
+export async function deletePersona(id: string): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.runAsync('UPDATE sessions SET personaId = NULL WHERE personaId = ?', [id]);
   await db.runAsync('DELETE FROM prompt_presets WHERE id = ?', [id]);
+  if ((await getSetting('defaultPersonaId')) === id) await setSetting('defaultPersonaId', '');
 }
 
-export async function presetNameExists(name: string, excludeId?: string): Promise<boolean> {
+export async function personaNameExists(name: string, excludeId?: string): Promise<boolean> {
   const db = await getDb();
   if (!db) return false;
   const row = excludeId

@@ -31,7 +31,7 @@ export default function PresetsScreen() {
 
   const refresh = useCallback(async () => {
     if (isWeb) return;
-    const p = await db.getAllPresets();
+    const p = await db.getAllPersonas();
     setPresets(p);
   }, [isWeb]);
 
@@ -55,13 +55,13 @@ export default function PresetsScreen() {
 
   const handleSave = async () => {
     if (!editName.trim()) { setNameError('Name is required'); return; }
-    const dup = await db.presetNameExists(editName.trim(), isNew ? undefined : editDialog?.id);
+    const dup = await db.personaNameExists(editName.trim(), isNew ? undefined : editDialog?.id);
     if (dup) { setNameError('A preset with this name already exists'); return; }
 
     if (isNew) {
-      await db.insertPreset(blankPersona({ id: db.generateId(), name: editName.trim(), content: editContent, createdAt: Date.now() }));
+      await db.insertPersona(blankPersona({ id: db.generateId(), name: editName.trim(), content: editContent, createdAt: Date.now() }));
     } else if (editDialog) {
-      await db.updatePreset(editDialog.id, { name: editName.trim(), content: editContent });
+      await db.updatePersona(editDialog.id, { name: editName.trim(), content: editContent });
     }
     setEditDialog(null);
     refresh();
@@ -70,16 +70,16 @@ export default function PresetsScreen() {
 
   const handleDelete = async () => {
     if (!deleteDialog) return;
-    await db.deletePreset(deleteDialog.id);
+    await db.deletePersona(deleteDialog.id);
     setDeleteDialog(null);
     refresh();
     setSnack('Preset deleted');
   };
 
   const addStarter = async (starter: typeof STARTERS[number]) => {
-    const exists = await db.presetNameExists(starter.name);
+    const exists = await db.personaNameExists(starter.name);
     if (exists) { setSnack('Preset already exists'); return; }
-    await db.insertPreset(blankPersona({ id: db.generateId(), name: starter.name, content: starter.content, createdAt: Date.now() }));
+    await db.insertPersona(blankPersona({ id: db.generateId(), name: starter.name, content: starter.content, createdAt: Date.now() }));
     refresh();
     setSnack('Preset added');
   };

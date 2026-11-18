@@ -82,7 +82,7 @@ export default function SettingsScreen() {
       await db.restoreBackup(backup);
       await settings.reload();
       setGlobalParams(await db.getGlobalParams());
-      setPresets(await db.getAllPresets());
+      setPresets(await db.getAllPersonas());
       setModels(await db.getAllModels());
       setSnack('Backup restored');
     } catch (e) {
@@ -95,7 +95,7 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       if (isWeb) return;
-      db.getAllPresets().then(setPresets).catch(() => {});
+      db.getAllPersonas().then(setPresets).catch(() => {});
       db.getAllModels().then(setModels).catch(() => {});
     }, [isWeb]),
   );
