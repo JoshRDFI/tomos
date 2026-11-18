@@ -16,12 +16,12 @@ import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
 import { loadSignature } from '@/lib/params';
 import { splitThinking } from '@/lib/thinking';
-import { withDate } from '@/lib/dateContext';
-import type { SessionRecord, MessageRecord, ModelRecord } from '@/types';
+import type { SessionRecord, MessageRecord, ModelRecord, Persona } from '@/types';
 import MessageBubble from '@/components/chat/MessageBubble';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
 import { toChatMessages } from '@/lib/prompt';
+import { isChatEmpty } from '@/lib/personas';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
 
@@ -40,6 +40,7 @@ export default function ChatScreen() {
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -106,7 +107,17 @@ export default function ChatScreen() {
     setSessions(s);
     const m = await db.getAllModels();
     setModels(m);
+    setPersonas(await db.getAllPersonas());
   }, [isWeb]);
+
+  // Persona picked on an empty chat: the greeting follows it.
+  const changePersona = useCallback(async (choice: db.PersonaChoice) => {
+    if (!session) return;
+    await db.setSessionPersona(session.id, choice);
+    const fresh = await db.getSession(session.id);
+    if (fresh) setSession(fresh);
+    setMessages(await db.getSessionMessages(session.id));
+  }, [session]);
 
   // Hugging Face downloads that finished while the app was away become models
   // here too, not only on the Models screen.
@@ -195,7 +206,7 @@ export default function ChatScreen() {
     const modelId = modelCtx.loadedModelId ?? (await db.getSetting('lastModelId'));
     const s = await db.createSession(modelId);
     setSession(s);
-    setMessages([]);
+    setMessages(await db.getSessionMessages(s.id));
     setSessions((prev) => [s, ...prev]);
     setDrawerOpen(false);
     db.setSetting('lastSessionId', s.id).catch(() => {});
@@ -246,8 +257,7 @@ export default function ChatScreen() {
     } catch {}
 
     try {
-      let systemPrompt = await db.getEffectiveSystemPrompt(fresh);
-      if ((await db.getSetting('includeDate')) !== '0') systemPrompt = withDate(systemPrompt, new Date());
+      const systemPrompt = await db.buildSystemMessage(fresh, currentMsgs);
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
         ...toChatMessages(currentMsgs),
@@ -340,8 +350,7 @@ export default function ChatScreen() {
       await db.insertMessage(userMsg);
 
       // Auto-title on first user message
-      const count = await db.getSessionMessageCount(session.id);
-      if (count <= 1) {
+      if ((await db.countUserMessages(session.id)) === 1) {
         await db.updateSession(session.id, { title: text.slice(0, 40), updatedAt: Date.now() });
       }
 
@@ -490,7 +499,8 @@ export default function ChatScreen() {
   // Render
   const drawerWidth = Math.min(screenWidth * 0.84, 360);
   const modelReady = modelCtx.status === 'ready';
-  const hasMessages = (messages?.length ?? 0) > 0;
+  const hasMessages = !isChatEmpty(messages ?? []);
+  const greetingMsg = !hasMessages ? ((messages ?? []).find((m) => m.kind === 'greeting') ?? null) : null;
 
   // Chronological order (oldest first); the list starts rendering from the
   // bottom. While streaming, a placeholder reply is appended at the end.
@@ -599,6 +609,11 @@ export default function ChatScreen() {
             hasModelInLib={(models?.length ?? 0) > 0}
             onSuggestion={(s) => setDraft({ text: s, key: Date.now() })}
             onOpenModelMenu={() => setModelMenuOpen(true)}
+            greeting={greetingMsg}
+            persona={db.personaChoiceOf(session)}
+            personas={personas}
+            onPersonaChange={changePersona}
+            onCopy={handleCopy}
           />
         ) : (
           // Clip the list so a tall message can never extend over (and take

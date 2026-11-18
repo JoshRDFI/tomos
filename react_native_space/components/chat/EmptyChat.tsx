@@ -4,7 +4,10 @@ import { Text, Button, Icon, useTheme, Chip } from 'react-native-paper';
 import { useRouter } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, typeScale, fontFamilies } from '@/constants/theme';
-import type { ModelRecord } from '@/types';
+import type { MessageRecord, ModelRecord, Persona } from '@/types';
+import type { PersonaChoice } from '@/lib/db';
+import Markdown from './Markdown';
+import PersonaPicker, { personaChoiceLabel } from './PersonaPicker';
 
 // Sentence starters: tapping one puts it in the message box to finish.
 const SUGGESTIONS = [
@@ -20,9 +23,15 @@ interface Props {
   hasModelInLib: boolean; // at least one model in library, even if not loaded
   onSuggestion: (s: string) => void;
   onOpenModelMenu: () => void;
+  /** A persona's greeting, shown until the user sends something. */
+  greeting?: MessageRecord | null;
+  persona: PersonaChoice;
+  personas: Persona[];
+  onPersonaChange: (c: PersonaChoice) => void;
+  onCopy: (text: string) => void;
 }
 
-export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSuggestion, onOpenModelMenu }: Props) {
+export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSuggestion, onOpenModelMenu, greeting, persona, personas, onPersonaChange, onCopy }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const router = useRouter();
@@ -75,6 +84,28 @@ export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSug
             {paramLabel && <Chip style={[styles.chip, { backgroundColor: c.surfaceRaised }]} textStyle={[styles.chipText, { color: c.textSecondary, fontFamily: fontFamilies.mono }]}>{paramLabel}</Chip>}
           </View>
         )}
+        {!!greeting && (
+          <View style={[styles.greeting, { backgroundColor: c.assistantBubble, borderColor: c.hairline }]}>
+            <Markdown content={greeting.content} onCopy={onCopy} />
+          </View>
+        )}
+        {(personas.length > 0 || persona.kind !== 'none') && (
+          <PersonaPicker
+            value={persona}
+            personas={personas}
+            allowCustom={false}
+            onChange={onPersonaChange}
+            anchor={(open) => (
+              <Pressable onPress={open} accessibilityRole="button" style={[styles.personaChip, { borderColor: c.hairline }]}>
+                <Icon source="account-voice" size={16} color={c.textSecondary} />
+                <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>
+                  Persona: {personaChoiceLabel(persona, personas)}
+                </Text>
+                <Icon source="menu-down" size={16} color={c.textSecondary} />
+              </Pressable>
+            )}
+          />
+        )}
         <View style={styles.suggestionsWrap}>
           {SUGGESTIONS.map((s, i) => (
             <Pressable key={i} onPress={() => onSuggestion(s.text)} style={[styles.suggChip, { backgroundColor: c.surfaceRaised, borderColor: c.hairline }]}>
@@ -101,6 +132,8 @@ const styles = StyleSheet.create({
   chipRow: { flexDirection: 'row', gap: spacing.xs, marginTop: spacing.xs },
   chip: { borderRadius: 8 },
   chipText: { fontSize: 12 },
+  greeting: { marginTop: spacing.md, padding: 12, borderRadius: radii.card, borderWidth: StyleSheet.hairlineWidth },
+  personaChip: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, marginTop: spacing.md, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radii.chip, borderWidth: StyleSheet.hairlineWidth },
   suggestionsWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.lg },
   suggChip: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radii.chip, borderWidth: StyleSheet.hairlineWidth },
 });

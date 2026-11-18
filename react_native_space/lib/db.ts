@@ -266,12 +266,6 @@ export async function buildSystemMessage(session: SessionRecord | null, path: Me
   });
 }
 
-export async function getEffectiveSystemPrompt(session: SessionRecord | null): Promise<string> {
-  if (session?.systemPromptOverride != null) return session.systemPromptOverride;
-  const v = await getSetting('defaultSystemPrompt');
-  return v ?? DEFAULT_SYSTEM_PROMPT;
-}
-
 // ── Models ──
 
 export async function getAllModels(): Promise<ModelRecord[]> {
