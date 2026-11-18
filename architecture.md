@@ -48,7 +48,9 @@ react_native_space/
     params.ts             ParamSet, APP_DEFAULTS, layer resolution, load/completion split, CLI flag parser
     paramCatalog.ts       catalog of known llama.cpp settings (labels, help, ranges, load vs completion)
     modelMeta.ts          GGUF recommended settings; prepareModel() for each reply
-    contextWindow.ts      fitToContext(): drop oldest turns to fit n_ctx
+    contextWindow.ts      fitToContext(): drop oldest turns to fit n_ctx (the fallback)
+    compaction.ts         auto-compaction planning: active summary, condense range, carry-over (pure)
+    compactionRunner.ts   compactIfNeeded() / prepareContinuation(): runs the summary completion
     branches.ts           visiblePath(), pathTo(), versionsOf(): message versions
     continuation.ts       buildContinuation(): prompt suffix + display prefix for Continue
     dateContext.ts        withDate(): today's date in the system prompt
@@ -85,6 +87,7 @@ All state is in SQLite, opened through `lib/sqliteLoader`. Tables:
 - `sessions`: chats, including `personaId`, `systemPromptOverride` (custom text) and `paramsOverride` (this chat's settings)
 - `messages`, with `messages_fts` (FTS5) kept in sync by triggers. Messages form a tree (`lib/branches.ts`): `parentId` links each message to the one it follows, and the parent's `selectedChildId` (or `sessions.rootMessageId` for first messages) picks the version shown. `getSessionMessages()` returns the visible path with `versions` on messages that have siblings. Edit and regenerate insert a sibling; nothing is deleted. Chats from before branching were linked into a single branch by a one-time migration.
 - `prompt_presets`: personas (instructions in `content`, plus `greeting`, `examples` JSON, `params` JSON of completion settings). Presets became personas by migration; chats whose custom text exactly matched a preset were linked to it. `messages.kind = 'greeting'` marks a persona's greeting.
+- `summaries`: auto-compaction summaries (`throughMessageId` = last message covered, content, model, time); cascade-deleted with the chat. `sessions.continuedFromId` and `sessions.carryOver` belong to "Continue in a new chat".
 - `downloads`: Hugging Face downloads (repo, pinned revision, parts as JSON with their DownloadManager ids and status, Wi-Fi only, error). Not in backups.
 
 Backups (`Settings → Backup`) are a JSON dump of every table except `downloads` (and model files); restore replaces chats, personas and settings in one transaction and inserts only columns the current schema has, so older backups restore into newer schemas.
@@ -144,6 +147,21 @@ To add a known setting, add an entry to `lib/paramCatalog.ts` (and a flag alias 
 5. Save the reply under `parentId` (and select it) with token count and speed. `messages.stopped` is 1 when the user stopped it and 2 when it hit the length limit or a full context.
 
 **Continue** passes the stopped reply as `cont`: `generate(..., prefill)` formats the chat up to the assistant turn (`getFormattedChat` with `add_generation_prompt`, or the manual template), appends the partial reply (`lib/continuation.ts`), and runs a raw-prompt completion; the result is written back into the same message. The answer goes in `content` and the thinking in `reasoning` (with `thinkingMs`); only answers are sent back to the model in later turns. A stopped reply is marked `stopped`; an empty stopped reply is discarded.
+
+## Long chats: compaction and continuing
+
+After a reply is saved, `runGeneration` starts `compactIfNeeded()` in the background (`app/index.tsx`, `compactionRef`):
+
+1. The **active summary** is the newest `summaries` row whose `throughMessageId` is on the visible path (`activeSummary`). Summaries belong to a branch: editing a condensed message moves the path off it, and an older summary (or none) applies.
+2. `planCompaction` counts the system message (with the summary) and each message after the summary. Over **70%** of the prompt budget (`n_ctx − n_predict − 16`, `llama.promptBudget`) it condenses the oldest messages until the rest is at most **40%**, always keeping the last **4** messages and starting the kept part on a user message.
+3. The request is the chat's own system message and the messages being condensed, then a user turn with `SUMMARY_INSTRUCTION` (`summaryRequest`). Because the system message comes from the same `db.buildSystemMessage`, the prompt starts with exactly what the model already read for the chat, and llama.rn reuses that prefix: it only reads the instruction. Thinking off, `n_predict` 400, temperature ≤ 0.5. Its `[gen] compaction:` log lines show `prompt_n` for checking that on a device.
+4. The result (thinking stripped) is saved as a new summary. Stopped or empty results save nothing. The next summary is written with the current one in its system message, so it covers everything before the kept messages.
+
+`buildSystemMessage` adds the summary after the instructions, date and examples ("Summary of the earlier part of this conversation:"), or a continued chat's `carryOver` ("Earlier conversation (continued from another chat):") when no summary applies yet. `fitToContext` still runs as the safety net.
+
+Sending, regenerating, continuing, switching chat or model all `await stopCompaction()` first (`stopGeneration()`, wait, nothing saved). The input stays usable during compaction.
+
+**Continue in a new chat** (chat settings, or the hint after the 3rd summary on a path): `prepareContinuation()` condenses first with a 40% trigger when a model is loaded, then `buildCarryOver(summary, messages after it)` (oldest dropped first to fit 40% of the budget). `db.createContinuation()` copies model, persona or custom text, and settings; no greeting.
 
 `stopGeneration()` calls `stopCompletion()` immediately. `releaseModel()` stops and awaits any in-flight completion before releasing the context, so a model switch or unload never frees memory under a running completion.
 

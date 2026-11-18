@@ -47,6 +47,11 @@ const sections = [
     body: `A persona gives the model a personality: instructions (who it is and how it replies), plus an optional greeting, example exchanges, and its own settings such as temperature. Pick one for each chat from the chip on a new chat or in Chat settings, and choose the one new chats start with in Settings.\n\nExamples shape the tone more than descriptions do, especially on small models: two or three short exchanges in the voice you want work better than a paragraph about it.\n\nA persona is sent with every message, so a long one leaves less room for the conversation. The editor shows roughly how many tokens it uses.\n\nImport a Markdown file (for example a soul.md) from Settings → Personas → Import: the whole file becomes the instructions, or use "## Greeting" and "## Examples" sections (User: / Assistant: lines) for the rest. Export writes the same format.`,
   },
   {
+    title: 'Long chats',
+    icon: 'text-box-multiple-outline',
+    body: `A model can only read so much at once (its context window). When a chat gets close to that, the app asks the model to condense the oldest messages into a short summary, right after a reply. You'll see "Condensing earlier messages…" for a minute or so; you can keep typing, and sending a message stops it.\n\nA divider marks where the summary starts; tap it to read the summary. Every message stays saved and visible: only what the model reads changes. If you edit a message that was condensed, the summary no longer applies to that version.\n\nTo start fresh but keep the thread, use Chat settings → Continue in a new chat. The new chat starts with the summary and the latest messages, the same persona and settings, and a link back to the old chat.`,
+  },
+  {
     title: 'Versions, continuing and backups',
     icon: 'source-branch',
     body: `Regenerating a reply or editing a message keeps the old one: use ‹ 2/3 › under the message to switch between versions.\n\nIf a reply was stopped or cut off by the length limit, tap ▷ under it (or long-press → Continue) to let the model carry on from where it stopped.\n\nSettings → Backup saves all chats, personas and settings to one file you can keep in Files or Drive, and restores them later (model files aren't included).`,

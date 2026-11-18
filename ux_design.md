@@ -276,6 +276,12 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
   - Text: `You:` / `Assistant:`.
   - Write it to `cacheDirectory/<title>.md|.txt` and call `Sharing.shareAsync`.
 
+**Long chats**
+- After a reply, if the conversation fills over 70% of the space for the prompt, older messages are condensed in the background: a status line "Condensing earlier messages… N s" with **Stop** at the end of the list. The composer stays usable; sending stops it (nothing saved) and it's tried again after the next reply.
+- A divider after the last condensed message: "Earlier messages condensed · View summary". Tapping it opens a dialog with the summary (selectable), when and by which model it was written. All messages stay visible and saved.
+- After the third summary on a chat, a Snackbar (10 s, once per chat): "This chat has been condensed several times. Continue in a new chat?" with action "Continue".
+- A continued chat shows a row at the top: chip "Continued from <title>" (opens that chat; "Continued from a deleted chat" when it's gone, not pressable) and "What was carried" (dialog with the carried-over text).
+
 **Startup:** open the `lastSessionId` session if it exists; otherwise create a new empty session.
 
 ### 2. Chat Settings (app/chat-settings.tsx?sessionId=)
@@ -288,6 +294,8 @@ Stack header: "Chat settings" with a back arrow.
 
 **Model settings section**
 - A `ParamEditor` (see *Settings editor* below) for this chat's layer. Inherited values come from app defaults → all chats → the model file → the model (the session's model, or `lastModelId`) → the chat's persona.
+
+**Continue in a new chat** button with a caption: "Starts a new chat with a summary of this one and its latest messages, the same persona and settings, and a link back." It returns to the chat, condenses first if needed (status line), then opens the new chat titled "<title> (cont.)".
 
 Changes auto-save (debounced 300 ms, merged, flushed when leaving the screen). Returning to the chat picks the changes up on focus.
 
