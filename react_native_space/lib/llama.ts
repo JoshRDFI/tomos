@@ -105,7 +105,7 @@ export interface GenerateResult {
 
 export type { StreamView } from './thinking';
 
-async function countTokens(text: string): Promise<number> {
+export async function countTokens(text: string): Promise<number> {
   try {
     const res = await _context.tokenize(text);
     return res?.tokens?.length ?? Math.ceil(text.length / 3);

@@ -4,10 +4,10 @@ import type { PersonaChoice } from '@/lib/db';
 import type { Persona } from '@/types';
 
 /** Label for a choice ("Default" for no persona). */
-export function personaChoiceLabel(choice: PersonaChoice, personas: Persona[]): string {
+export function personaChoiceLabel(choice: PersonaChoice, personas: Persona[], noneLabel = 'Default'): string {
   if (choice.kind === 'custom') return 'Custom';
-  if (choice.kind === 'persona') return personas.find((p) => p.id === choice.id)?.name ?? 'Default';
-  return 'Default';
+  if (choice.kind === 'persona') return personas.find((p) => p.id === choice.id)?.name ?? noneLabel;
+  return noneLabel;
 }
 
 interface Props {

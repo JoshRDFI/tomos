@@ -5,10 +5,10 @@ import Slider from '@react-native-community/slider';
 import type { AppTheme } from '@/constants/theme';
 import { fontFamilies, radii, spacing } from '@/constants/theme';
 import {
-  CATALOG_BY_KEY, PARAM_CATALOG, PARAM_GROUPS, RESERVED_KEYS, isLoadParam, type ParamDef,
+  CATALOG_BY_KEY, LOAD_PARAM_KEYS, PARAM_CATALOG, PARAM_GROUPS, RESERVED_KEYS, isLoadParam, type ParamDef,
 } from '@/lib/paramCatalog';
 import {
-  SOURCE_LABELS, formatValue, parseCliFlags, parseValue,
+  SOURCE_LABELS, formatValue, parseCliFlags, parseValue, splitParams,
   type ParamSet, type ParamValue, type ResolvedParams,
 } from '@/lib/params';
 
@@ -18,6 +18,8 @@ interface Props {
   /** Effective values from the levels below this one. */
   inherited: ResolvedParams;
   onChange: (next: ParamSet) => void;
+  /** Only per-completion settings (personas): load-time keys are hidden and dropped. */
+  completionOnly?: boolean;
 }
 
 const CATALOG_ORDER = new Map(PARAM_CATALOG.map((d, i) => [d.key, i]));
@@ -32,7 +34,8 @@ const KEY_PATTERN = /^[a-z_][a-z0-9_]*$/i;
  * (editable), what is inherited from lower levels (tap to override), and lets
  * the user add any catalog setting, a custom key, or paste command-line flags.
  */
-export default function ParamEditor({ overrides, inherited, onChange }: Props) {
+export default function ParamEditor({ overrides, inherited, onChange: rawOnChange, completionOnly = false }: Props) {
+  const onChange = (next: ParamSet) => rawOnChange(completionOnly ? splitParams(next).completion : next);
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const [addOpen, setAddOpen] = useState(false);
@@ -40,7 +43,7 @@ export default function ParamEditor({ overrides, inherited, onChange }: Props) {
   const [showInherited, setShowInherited] = useState(false);
 
   const setKeys = sortKeys(Object.keys(overrides));
-  const inheritedKeys = sortKeys(Object.keys(inherited.values).filter((k) => !(k in overrides)));
+  const inheritedKeys = sortKeys(Object.keys(inherited.values).filter((k) => !(k in overrides) && !(completionOnly && isLoadParam(k))));
 
   const setValue = (key: string, value: ParamValue) => onChange({ ...overrides, [key]: value });
   const remove = (key: string) => {
@@ -107,7 +110,7 @@ export default function ParamEditor({ overrides, inherited, onChange }: Props) {
 
       <AddSettingDialog
         visible={addOpen}
-        exclude={new Set(setKeys)}
+        exclude={new Set(completionOnly ? [...setKeys, ...LOAD_PARAM_KEYS] : setKeys)}
         inherited={inherited}
         onDismiss={() => setAddOpen(false)}
         onAdd={(key, value) => {

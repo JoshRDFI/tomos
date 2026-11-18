@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView } from 'react-native';
-import { Text, Switch, useTheme, Button, Menu, TextInput as PaperInput, Dialog, Portal, Snackbar } from 'react-native-paper';
+import { Text, useTheme, Button, TextInput as PaperInput, Dialog, Portal, Snackbar } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
-import { blankPersona } from '@/lib/personas';
+import { blankPersona, completionParamsOnly } from '@/lib/personas';
+import PersonaPicker, { personaChoiceLabel } from '@/components/chat/PersonaPicker';
 import { spacing, fontFamilies } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
 import * as db from '@/lib/db';
@@ -21,13 +22,13 @@ export default function ChatSettingsScreen() {
   const isWeb = Platform.OS === 'web';
 
   const [session, setSession] = useState<SessionRecord | null>(null);
-  const [useDefaultPrompt, setUseDefaultPrompt] = useState(true);
+  const [choice, setChoice] = useState<db.PersonaChoice>({ kind: 'none' });
+  const [baseLayers, setBaseLayers] = useState<{ global: ParamSet; file: ParamSet; model: ParamSet }>({ global: {}, file: {}, model: {} });
   const [promptText, setPromptText] = useState('');
   const [overrides, setOverrides] = useState<ParamSet>({});
   const [inherited, setInherited] = useState<ResolvedParams>(() => resolveParams({}));
   const [modelName, setModelName] = useState<string | null>(null);
   const [presets, setPresets] = useState<Persona[]>([]);
-  const [presetMenu, setPresetMenu] = useState(false);
   const [saveDialog, setSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [saveError, setSaveError] = useState('');
@@ -40,7 +41,7 @@ export default function ChatSettingsScreen() {
       const s = await db.getSession(sessionId);
       if (!s) return;
       setSession(s);
-      setUseDefaultPrompt(s.systemPromptOverride == null);
+      setChoice(db.personaChoiceOf(s));
       setPromptText(s.systemPromptOverride ?? settings.defaultSystemPrompt);
       setOverrides(parseParamSet(s.paramsOverride));
       // Inherited: all chats < model file < this model, for the chat's model.
@@ -48,13 +49,12 @@ export default function ChatSettingsScreen() {
       let model = modelId ? await db.getModel(modelId) : null;
       if (model) model = await ensureFileParams(model);
       setModelName(model?.displayName ?? null);
-      setInherited(resolveParams({
-        global: await db.getGlobalParams(),
-        file: parseParamSet(model?.fileParams),
-        model: parseParamSet(model?.paramsOverride),
-      }));
+      const layers = { global: await db.getGlobalParams(), file: parseParamSet(model?.fileParams), model: parseParamSet(model?.paramsOverride) };
+      setBaseLayers(layers);
       const p = await db.getAllPersonas();
       setPresets(p);
+      const chosen = s.systemPromptOverride == null && s.personaId ? p.find((x) => x.id === s.personaId) : undefined;
+      setInherited(resolveParams({ ...layers, persona: chosen ? completionParamsOnly(chosen.params) : undefined }));
     })();
   }, [isWeb, sessionId]);
 
@@ -80,18 +80,24 @@ export default function ChatSettingsScreen() {
   // Save immediately when leaving the screen.
   useEffect(() => flush, [flush]);
 
-  const toggleDefaultPrompt = (val: boolean) => {
-    setUseDefaultPrompt(val);
-    if (val) {
-      autoSave({ systemPromptOverride: null });
-    } else {
-      autoSave({ systemPromptOverride: promptText });
-    }
+  // Inherited settings include the chosen persona's.
+  const applyChoice = useCallback((next: db.PersonaChoice, list: Persona[] = presets) => {
+    setChoice(next);
+    const persona = next.kind === 'persona' ? list.find((x) => x.id === next.id) : undefined;
+    setInherited(resolveParams({ ...baseLayers, persona: persona ? completionParamsOnly(persona.params) : undefined }));
+  }, [presets, baseLayers]);
+
+  const changeChoice = async (next: db.PersonaChoice) => {
+    flush();
+    const resolved: db.PersonaChoice = next.kind === 'custom' ? { kind: 'custom', text: promptText } : next;
+    applyChoice(resolved);
+    if (sessionId) await db.setSessionPersona(sessionId, resolved);
   };
 
   const updatePrompt = (text: string) => {
     setPromptText(text);
-    if (!useDefaultPrompt) {
+    if (choice.kind === 'custom') {
+      setChoice({ kind: 'custom', text });
       autoSave({ systemPromptOverride: text });
     }
   };
@@ -101,17 +107,23 @@ export default function ChatSettingsScreen() {
     autoSave({ paramsOverride: serializeParamSet(next) });
   };
 
-  const savePreset = async () => {
-    if (!saveName.trim()) { setSaveError('Name is required'); return; }
-    const exists = await db.personaNameExists(saveName.trim());
-    if (exists) { setSaveError('A preset with this name already exists'); return; }
-    await db.insertPersona(blankPersona({ id: db.generateId(), name: saveName.trim(), content: promptText, createdAt: Date.now() }));
+  // "Save as persona": the custom text becomes a persona, and this chat uses it.
+  const savePersona = async () => {
+    const n = saveName.trim();
+    if (!n) { setSaveError('Name is required'); return; }
+    if (await db.personaNameExists(n)) { setSaveError('A persona with this name already exists'); return; }
+    const persona = blankPersona({ id: db.generateId(), name: n, content: promptText, createdAt: Date.now() });
+    await db.insertPersona(persona);
     setSaveDialog(false);
     setSaveName('');
     setSaveError('');
-    setSnack('Preset saved');
-    const p = await db.getAllPersonas();
-    setPresets(p);
+    const list = await db.getAllPersonas();
+    setPresets(list);
+    flush();
+    const next: db.PersonaChoice = { kind: 'persona', id: persona.id };
+    applyChoice(next, list);
+    if (sessionId) await db.setSessionPersona(sessionId, next);
+    setSnack(`Saved as persona "${n}"`);
   };
 
   return (
@@ -119,12 +131,23 @@ export default function ChatSettingsScreen() {
       <Stack.Screen options={{ title: 'Chat settings', headerStyle: { backgroundColor: c.surface }, headerTintColor: c.text }} />
       <ScrollView style={{ flex: 1, backgroundColor: c.background }} contentContainerStyle={{ padding: spacing.md, gap: spacing.md }}>
         {/* System prompt */}
-        <Text style={[styles.sectionTitle, { color: c.text, fontFamily: fontFamilies.interSemiBold }]}>System prompt</Text>
+        <Text style={[styles.sectionTitle, { color: c.text, fontFamily: fontFamilies.interSemiBold }]}>Instructions</Text>
         <View style={styles.switchRow}>
-          <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 15, flex: 1 }}>Use default system prompt</Text>
-          <Switch value={useDefaultPrompt} onValueChange={toggleDefaultPrompt} color={c.brand} />
+          <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 15, flex: 1 }}>Persona</Text>
+          <PersonaPicker
+            value={choice}
+            personas={presets}
+            allowCustom
+            onChange={changeChoice}
+            anchor={(open) => (
+              <Button mode="outlined" onPress={open} icon="account-voice" compact>{personaChoiceLabel(choice, presets, 'No persona')}</Button>
+            )}
+          />
         </View>
-        {!useDefaultPrompt && (
+        {choice.kind === 'none' && (
+          <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>Uses the default system prompt from Settings.</Text>
+        )}
+        {choice.kind === 'custom' && (
           <>
             <PaperInput
               value={promptText}
@@ -134,19 +157,7 @@ export default function ChatSettingsScreen() {
               numberOfLines={5}
               style={{ backgroundColor: c.surfaceRaised }}
             />
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              <Menu
-                visible={presetMenu}
-                onDismiss={() => setPresetMenu(false)}
-                anchor={<Button mode="outlined" onPress={() => setPresetMenu(true)} compact>Load preset</Button>}
-              >
-                {presets.map((p) => (
-                  <Menu.Item key={p.id} title={p.name} onPress={() => { setPromptText(p.content); setPresetMenu(false); autoSave({ systemPromptOverride: p.content }); }} />
-                ))}
-                {presets.length === 0 && <Menu.Item title="No presets yet" disabled />}
-              </Menu>
-              <Button mode="outlined" onPress={() => setSaveDialog(true)} compact>Save as preset</Button>
-            </View>
+            <Button mode="outlined" onPress={() => setSaveDialog(true)} compact style={{ alignSelf: 'flex-start' }}>Save as persona</Button>
           </>
         )}
 
@@ -160,14 +171,14 @@ export default function ChatSettingsScreen() {
 
       <Portal>
         <Dialog visible={saveDialog} onDismiss={() => setSaveDialog(false)}>
-          <Dialog.Title>Save as preset</Dialog.Title>
+          <Dialog.Title>Save as persona</Dialog.Title>
           <Dialog.Content>
-            <PaperInput value={saveName} onChangeText={(t) => { setSaveName(t); setSaveError(''); }} mode="outlined" label="Preset name" error={!!saveError} />
+            <PaperInput value={saveName} onChangeText={(t) => { setSaveName(t); setSaveError(''); }} mode="outlined" label="Persona name" error={!!saveError} />
             {!!saveError && <Text style={{ color: c.error, fontSize: 12, marginTop: 4 }}>{saveError}</Text>}
           </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setSaveDialog(false)}>Cancel</Button>
-            <Button onPress={savePreset}>Save</Button>
+            <Button onPress={savePersona}>Save</Button>
           </Dialog.Actions>
         </Dialog>
       </Portal>
