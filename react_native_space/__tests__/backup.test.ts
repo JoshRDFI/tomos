@@ -31,7 +31,7 @@ describe('parseBackup', () => {
 
   it.each([
     ['not json', '{', 'not valid JSON'],
-    ['another file', JSON.stringify({ hello: 1 }), "isn't an LLM Chat backup"],
+    ['another file', JSON.stringify({ hello: 1 }), "isn't a backup from this app"],
     ['newer version', JSON.stringify({ ...valid(), version: 99 }), 'newer version'],
     ['missing table', JSON.stringify({ ...valid(), messages: undefined }), 'damaged (messages)'],
     ['orphan message', JSON.stringify({ ...valid(), messages: [{ id: 'y', sessionId: 'nope' }] }), 'without a chat'],

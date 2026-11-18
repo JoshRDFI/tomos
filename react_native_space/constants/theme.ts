@@ -18,6 +18,7 @@ export const darkColors = {
   userBubble: '#1F3B37',
   assistantBubble: '#181D21',
   codeBg: '#0A0D0F',
+  logoBackdrop: '#FFFFFF',
   // Code highlighting
   synComment: '#6B747C',
   synKeyword: '#C792EA',
@@ -42,6 +43,7 @@ export const lightColors = {
   userBubble: '#DCEFEB',
   assistantBubble: '#FFFFFF',
   codeBg: '#F0F2F4',
+  logoBackdrop: '#FFFFFF',
   // Code highlighting
   synComment: '#6A737D',
   synKeyword: '#8E3FB0',
@@ -66,6 +68,8 @@ export type AppColors = {
   userBubble: string;
   assistantBubble: string;
   codeBg: string;
+  /** The RDF logo is drawn for a white background, in both themes. */
+  logoBackdrop: string;
   synComment: string;
   synKeyword: string;
   synString: string;
