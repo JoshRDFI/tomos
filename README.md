@@ -22,11 +22,11 @@ Everything runs on the phone. There are no accounts, no analytics, no ads and no
   - per chat
 - **Paste flags.** Paste a `llama-cli` command from a model card (for example PrismML's Bonsai 2 settings) and the app applies it.
 - Chat history with full-text search, rename, and export to Markdown or text.
-- System prompt presets.
+- **Personas.** Instructions plus an optional greeting, example exchanges and sampling settings, picked per chat. Import a `soul.md` (or any Markdown file) as a persona, and export them the same way.
 - Chat templates: auto (from the file), ChatML, Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca, raw.
 - Long chats are trimmed to fit the context window automatically; the database keeps the full history.
 - Dark, light and system themes.
-- Backups of chats, settings and presets (model files aren't included).
+- Backups of chats, personas and settings (model files aren't included).
 - About screen with every open-source license that ships in the app.
 
 ## Get the app

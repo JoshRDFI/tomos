@@ -29,7 +29,8 @@ app/
     index.tsx          // Settings: appearance, system prompt, model settings for all chats, per-model list, About row
     model.tsx          // One model's settings (?modelId=): file recommendations + this model's overrides
     about.tsx          // App/version info, llama.cpp build, open-source licenses
-    presets.tsx        // System prompt presets (list/create/edit/delete)
+    personas.tsx       // Personas: list, starters, Markdown import
+    persona.tsx        // One persona: instructions, greeting, examples, settings, export, delete
   help.tsx             // Help / info
 components/params/ParamEditor.tsx   // shared llama.cpp settings editor (global, model and chat levels)
 constants/theme.ts
@@ -98,11 +99,16 @@ No tabs and no `(group)` folders. The drawer is a component inside `index.tsx`, 
 
 **messages_fts** — FTS5 virtual table (content, sessionId UNINDEXED, messageId UNINDEXED), kept in sync by triggers on insert, update and delete of messages.
 
-**prompt_presets**
+**prompt_presets** (personas; the table kept its old name)
 - id TEXT PK
 - name TEXT UNIQUE
-- content TEXT
-- createdAt INTEGER
+- content TEXT: the instructions (system prompt)
+- greeting TEXT NULL: first assistant message of a new chat
+- examples TEXT NULL: JSON `[{user, assistant}]`, appended to the system message under "Examples of how you reply:"
+- params TEXT NULL: JSON ParamSet, per-completion settings only (load-time keys are dropped)
+- createdAt INTEGER, updatedAt INTEGER
+
+`sessions.personaId` links a chat to its persona (null: custom text or the default prompt); `messages.kind` is `'greeting'` for a persona's greeting. The Settings default (`settings.defaultPersonaId`) is copied into `personaId` when a chat is created, so changing it never changes existing chats.
 
 **ParamSet** = a flat map of llama.rn parameter names to values (`{temperature: 1.0, top_k: 20, enable_thinking: true, …}`). Only keys explicitly set at a level are stored. Older builds' camelCase keys (`topP`, `maxTokens`, `contextLength`, …) are mapped on read.
 
@@ -115,6 +121,7 @@ Effective settings are resolved per reply; later layers win:
 | 2 | Settings for all chats | `settings.globalParams` | Settings → Model settings for all chats |
 | 3 | Model file recommendations | `models.fileParams` | read-only, shown on the model's settings page |
 | 4 | This model | `models.paramsOverride` | Settings → Settings per model, or Models → ⋮ → Settings… |
+| 4b | Persona | `prompt_presets.params` (chat's persona) | Settings → Personas → persona → Settings |
 | 5 | This chat | `sessions.paramsOverride` | Chat settings (⚙ in the chat) |
 
 App defaults:
@@ -243,6 +250,7 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
   - Large model name (display style, wraps to two lines max) with its quant/size chip.
   - Below it, 4 suggestion chips that fill the composer (never send) when tapped, focused with the cursor at the end so the user finishes the sentence: "Explain a concept simply" → "Explain simply: ", "Summarize this text…" → "Summarize this text:" + newline, "Write a Python function that…", "Brainstorm ideas for…".
   - These sit in the lower half, above the composer.
+  - Above the suggestions: the persona's greeting (if any) in an assistant bubble, then a chip "Persona: <name> ▾" (shown when personas exist) opening the persona menu without "Custom". A chat counts as empty until the user sends something; auto-titling uses the first user message.
 - **Session has no model and the library is not empty:** inline row "Choose a model for this chat" with a button that opens the model-switch menu.
 
 **Drawer (left, react-native-drawer-layout, width 84% max 360dp, surface colour)**
@@ -273,15 +281,13 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 ### 2. Chat Settings (app/chat-settings.tsx?sessionId=)
 Stack header: "Chat settings" with a back arrow.
 
-**System prompt section**
-- Switch "Use default system prompt" (on when `systemPromptOverride` is null).
-- When off, a multiline TextInput (4–10 lines) shows the override.
-- Buttons:
-  - "Load preset": menu of presets that fills the field.
-  - "Save as preset": name dialog, inserts into prompt_presets; a duplicate name shows an inline error.
+**Instructions section**
+- Row "Persona" with a menu: "No persona (default system prompt)", each persona, "Custom". Order of precedence: custom text > persona > default system prompt.
+- Custom shows a multiline TextInput (the chat's `systemPromptOverride`) and "Save as persona" (name dialog; creates a persona from the text and switches the chat to it; a duplicate name shows an inline error).
+- Changing the persona while the chat has no user messages swaps the greeting.
 
 **Model settings section**
-- A `ParamEditor` (see *Settings editor* below) for this chat's layer. Inherited values come from app defaults → all chats → the model file → the model (the session's model, or `lastModelId`).
+- A `ParamEditor` (see *Settings editor* below) for this chat's layer. Inherited values come from app defaults → all chats → the model file → the model (the session's model, or `lastModelId`) → the chat's persona.
 
 Changes auto-save (debounced 300 ms, merged, flushed when leaving the screen). Returning to the chat picks the changes up on focus.
 
@@ -354,15 +360,15 @@ Stack header: "Download from Hugging Face". Android only.
 ### 5. Settings (app/settings/index.tsx)
 Reached from the drawer's "Settings" row. One scrolling page:
 - **Appearance:** SegmentedButtons Dark / Light / System (default Dark). Applies instantly.
-- **System prompt:** "Used by every chat unless the chat sets its own."
-  - Multiline TextInput.
-  - Buttons "Load preset" (menu) and "Manage presets" → push Presets.
+- **New chats use:** "Applies to chats you start from now on; each chat can change it in its own settings."
+  - Persona menu ("No persona (default system prompt)" or a persona; setting `defaultPersonaId`) and "Manage personas" → push Personas.
+  - With no persona chosen, the default system prompt's multiline TextInput (used by chats with no persona and no text of their own).
   - Switch row "Tell the model today's date" (default on), caption showing the sentence added: "Today is Sunday, November 15, 2026." (`lib/dateContext.ts`, local time, appended to the effective system prompt of every chat at send time; setting key `includeDate`).
 - **Model settings for all chats:** a `ParamEditor` for the global layer (inherits only app defaults). Debounced save, flushed on leave.
 - **Settings per model:** one row per library model with a summary ("3 from model file · 2 customized" or "Using settings for all chats") → push Model settings. With no models, an "Add a model" button.
-- **Backup:** "All chats (with every version), presets and settings, as one JSON file…".
+- **Backup:** "All chats (with every version), personas and settings, as one JSON file…".
   - "Back up" writes `llmchat-backup-YYYY-MM-DD.json` (`lib/backup.ts`, format `llmchat-backup` v1) and opens the share sheet (save to Files/Drive, send, …).
-  - "Restore…" picks a file, validates it (snackbar with the reason if it isn't a backup, is from a newer app version, or is damaged), then asks "Replace everything with this backup?" with "N chats, M messages, from DATE". Replace runs in one transaction: chats, messages, presets and settings are replaced; `lastModelId` stays; model files and the model list stay, and models matching a backup entry by file name and size get its name, template and settings; chats on other models keep no model. Disabled while a reply is generating.
+  - "Restore…" picks a file, validates it (snackbar with the reason if it isn't a backup, is from a newer app version, or is damaged), then asks "Replace everything with this backup?" with "N chats, M messages, from DATE". Replace runs in one transaction: chats, messages, personas and settings are replaced; `lastModelId` stays; model files and the model list stay, and models matching a backup entry by file name and size get its name, template and settings; chats on other models keep no model. Disabled while a reply is generating.
 - **About & licenses** row → push About.
 
 ### 5a. Model settings (app/settings/model.tsx?modelId=)
@@ -385,12 +391,15 @@ Shared by Settings, Model settings and Chat settings. Props: the overrides at th
 - Card: the RDF Industries logo (44 dp, on a white disc in both themes) beside the app name and "by RDF Industries"; version (expo-constants), llama.cpp build number and commit (llama.rn `BuildInfo`); "Runs language models entirely on this phone. Chats, settings and model files never leave the device."; "© 2026 RDF Industries, Inc. Open source under the Apache License 2.0."; and a "Source code on GitHub" link. Name, publisher, license and repo URL come from `constants/app.ts`.
 - **Open-source licenses:** searchable FlashList from `constants/licenses.json`, in sections "On-device inference (native code)", "Fonts", "Adapted source code", "JavaScript packages". Tap an entry to expand its project link and full license text (selectable, mono). Packages without a license file show their license name and link.
 
-### 6. Presets (app/settings/presets.tsx)
-- List of presets: name plus a 2-line content preview.
-- FAB "New preset".
-- Tap a preset to open an edit dialog (name and content).
-- Swipe or overflow menu to delete, with a confirm.
-- Empty state with one tap-to-add suggestion card per starter preset: "Concise assistant", "Code reviewer", "Writing editor". Each card shows its content prefilled.
+### 6. Personas (app/settings/personas.tsx, app/settings/persona.tsx)
+- List: name plus a 2-line preview of the instructions; FAB "New persona"; header "Import" (any file → `parsePersonaMarkdown` → a new persona, name made unique, then its editor opens).
+- Starter cards for starters not yet added: "Concise assistant", "Code reviewer", "Writing editor", and "Friendly explainer" (with a greeting and two examples).
+- **Editor** (header Save; leaving with unsaved changes asks Save/Discard):
+  - Name (required, unique), Instructions (required), Greeting (optional), Example exchanges (User/Reply pairs, add/remove).
+  - "About N tokens per message": the loaded model's tokenizer, else characters ÷ 4, for instructions + examples.
+  - Settings: `ParamEditor` limited to per-completion settings, inheriting from all chats.
+  - Export (Markdown via the share sheet) and Delete (confirm; chats using it fall back to the default system prompt).
+- **Markdown format** (`lib/personaMarkdown.ts`): optional `---` front matter (`name:` and setting `key: value` lines), then the instructions, then optional `## Greeting` and `## Examples` (`User:` / `Assistant:` lines). A file with no front matter or sections is all instructions, named after the file (`soul.md` → "Soul").
 
 ### 7. Help (app/help.tsx)
 Static sections as Paper List.Accordion items:
@@ -408,7 +417,7 @@ Static sections as Paper List.Accordion items:
 - No authentication and no auth guards. The app opens directly on Chat.
 - Root `<Stack>` in `app/_layout.tsx`:
   - `index` (Chat): headerShown false, with its custom top bar.
-  - `chat-settings`, `search`, `models`, `settings/index`, `settings/model`, `settings/about`, `settings/presets`, `help`: native headers with a back arrow. They slide in from the right on push and pop on back or the Android back button.
+  - `chat-settings`, `search`, `models`, `settings/index`, `settings/model`, `settings/about`, `settings/personas`, `settings/persona`, `help`: native headers with a back arrow. They slide in from the right on push and pop on back or the Android back button.
 - Left drawer lives only on Chat. It opens via the hamburger or a swipe from the left edge, and closes on scrim tap, swipe, back press or selection.
 - Drawer actions:
   - Selecting a session or tapping New chat closes the drawer and swaps the session in place (no navigation).
@@ -424,7 +433,7 @@ Static sections as Paper List.Accordion items:
 
 **First screen:** the Chat screen of the last session. The conversation fills the screen. The composer and send/stop button sit at the bottom in thumb reach, and the model name in the slim top bar confirms what is running. On an empty chat, the model name is the largest element, with suggestion chips just above the composer.
 
-**First-run content:** described under Chat empty states — the "Add a model" focal card on a tinted block, then the model name plus suggestion chips. Presets has starter suggestion cards.
+**First-run content:** described under Chat empty states — the "Add a model" focal card on a tinted block, then the model name plus suggestion chips. Personas has starter cards.
 
 **References:**
 - ChatGPT Android: minimal chrome, drawer history grouped by date.
@@ -512,7 +521,7 @@ No gradients and no glass effects.
 </animation_and_motion>
 
 <component_standards>
-- Every data screen (Chat, drawer list, Search, Models, Presets) has loading, empty (one clear action) and error (with Retry) states, as described above.
+- Every data screen (Chat, drawer list, Search, Models, Personas) has loading, empty (one clear action) and error (with Retry) states, as described above.
 - FlashList for the message list, session list, search results and model list.
 - Accessibility:
   - Contrast ≥ 4.5:1 in both themes.

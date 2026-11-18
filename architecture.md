@@ -26,15 +26,16 @@ react_native_space/
   app/                    expo-router screens
     _layout.tsx           fonts, providers (Database → Settings → Model → Paper), root Stack
     index.tsx             chat screen; owns the left drawer and the reply pipeline
-    chat-settings.tsx     per-chat system prompt and settings layer
+    chat-settings.tsx     per-chat persona/custom instructions and settings layer
     search.tsx            FTS search across chats
     models.tsx            model library: import, load, template, rename, remove; download cards
     download.tsx          Hugging Face link → file list → start a download
     help.tsx
-    settings/index.tsx    appearance, system prompt, settings for all chats, per-model list, About
+    settings/index.tsx    appearance, default persona / system prompt, settings for all chats, per-model list, About
     settings/model.tsx    one model: file recommendations + its own settings layer
     settings/about.tsx    version, llama.cpp build, open-source licenses
-    settings/presets.tsx  system prompt presets
+    settings/personas.tsx personas list, starters, Markdown import
+    settings/persona.tsx  one persona: instructions, greeting, examples, settings, export
   components/
     chat/                 MessageBubble, Markdown (mdast → RN views), useThrottledText, ChatInput, EmptyChat
     drawer/               DrawerContent
@@ -51,6 +52,9 @@ react_native_space/
     branches.ts           visiblePath(), pathTo(), versionsOf(): message versions
     continuation.ts       buildContinuation(): prompt suffix + display prefix for Continue
     dateContext.ts        withDate(): today's date in the system prompt
+    personas.ts           which instructions a chat uses, migration linking, helpers (pure)
+    personaMarkdown.ts    persona ⇄ Markdown (soul.md import)
+    prompt.ts             composeSystemMessage, formatExamples, toChatMessages (pure)
     backup.ts             backup file format, validation, model matching (DB side in db.ts)
     templates.ts          manual chat templates + stop strings
     gguf.ts               quant/size parsing from file names
@@ -76,14 +80,14 @@ react_native_space/
 
 All state is in SQLite, opened through `lib/sqliteLoader`. Tables:
 
-- `settings`: key/value JSON (`themeMode`, `defaultSystemPrompt`, `includeDate`, `globalParams`, `lastSessionId`, `lastModelId`)
+- `settings`: key/value JSON (`themeMode`, `defaultSystemPrompt`, `defaultPersonaId`, `includeDate`, `globalParams`, `lastSessionId`, `lastModelId`)
 - `models`: the library, including `fileParams` (recommended settings read from the GGUF) and `paramsOverride` (this model's settings)
-- `sessions`: chats, including `systemPromptOverride` and `paramsOverride` (this chat's settings)
+- `sessions`: chats, including `personaId`, `systemPromptOverride` (custom text) and `paramsOverride` (this chat's settings)
 - `messages`, with `messages_fts` (FTS5) kept in sync by triggers. Messages form a tree (`lib/branches.ts`): `parentId` links each message to the one it follows, and the parent's `selectedChildId` (or `sessions.rootMessageId` for first messages) picks the version shown. `getSessionMessages()` returns the visible path with `versions` on messages that have siblings. Edit and regenerate insert a sibling; nothing is deleted. Chats from before branching were linked into a single branch by a one-time migration.
-- `prompt_presets`
+- `prompt_presets`: personas (instructions in `content`, plus `greeting`, `examples` JSON, `params` JSON of completion settings). Presets became personas by migration; chats whose custom text exactly matched a preset were linked to it. `messages.kind = 'greeting'` marks a persona's greeting.
 - `downloads`: Hugging Face downloads (repo, pinned revision, parts as JSON with their DownloadManager ids and status, Wi-Fi only, error). Not in backups.
 
-Backups (`Settings → Backup`) are a JSON dump of every table except `downloads` (and model files); restore replaces chats, presets and settings in one transaction and inserts only columns the current schema has, so older backups restore into newer schemas.
+Backups (`Settings → Backup`) are a JSON dump of every table except `downloads` (and model files); restore replaces chats, personas and settings in one transaction and inserts only columns the current schema has, so older backups restore into newer schemas.
 
 Migrations are additive and run at startup in `lib/db.ts` (`PRAGMA table_info` then `ALTER TABLE ADD COLUMN`); `getDb()` resolves only after they finish. Never rewrite or drop existing columns; installed copies carry old data.
 
@@ -106,13 +110,14 @@ Model files are copied into `documentDirectory/models/` on import (legacy `copyA
 
 Settings are a `ParamSet`: a flat map of **llama.rn parameter names** to values. Using llama.rn's own names means any option it supports can be passed through, including ones the catalog doesn't know about ("Custom…").
 
-Five layers, later wins (`resolveParams` in `lib/params.ts`):
+Six layers, later wins (`resolveParams` in `lib/params.ts`):
 
 1. `APP_DEFAULTS`
 2. settings for all chats (`settings.globalParams`)
 3. model file recommendations (`models.fileParams`, from GGUF `general.sampling.*`)
 4. this model (`models.paramsOverride`)
-5. this chat (`sessions.paramsOverride`)
+5. the chat's persona (`prompt_presets.params`, completion settings only, so switching persona never reloads the model)
+6. this chat (`sessions.paramsOverride`)
 
 Each layer stores only the keys set at that level. The resolved result records the source layer of every value so the UI can show where it came from.
 
@@ -126,7 +131,7 @@ To add a known setting, add an entry to `lib/paramCatalog.ts` (and a flag alias 
 
 `runGeneration(sessionId, model, parentId)` in `app/index.tsx`, guarded by `generatingRef`. It replies to `parentId` (a user message) using the path leading to it:
 
-1. Re-read the session from the DB (chat settings may have changed while away), and load the path to `parentId`.
+1. Re-read the session from the DB (chat settings may have changed while away), and load the path to `parentId`. `db.buildSystemMessage(session, path)` builds the system message: instructions (custom text > persona > default prompt, `resolveInstructions`), the date line, then the persona's examples (`composeSystemMessage`). Every request for a chat builds it here.
 2. `prepareModel(model, session)`: re-read the model, read GGUF recommendations once if missing, resolve and split settings.
 3. Reload the model if its load signature changed. `ModelContext` serializes loads through a promise chain.
 4. `llama.generate()`:

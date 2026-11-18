@@ -42,9 +42,14 @@ const sections = [
     body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off, add the "Thinking" setting and switch it off (for one chat, a model, or all chats). Setting "Reasoning format" to None shows the raw output, tags included.`,
   },
   {
+    title: 'Personas',
+    icon: 'account-voice',
+    body: `A persona gives the model a personality: instructions (who it is and how it replies), plus an optional greeting, example exchanges, and its own settings such as temperature. Pick one for each chat from the chip on a new chat or in Chat settings, and choose the one new chats start with in Settings.\n\nExamples shape the tone more than descriptions do, especially on small models: two or three short exchanges in the voice you want work better than a paragraph about it.\n\nA persona is sent with every message, so a long one leaves less room for the conversation. The editor shows roughly how many tokens it uses.\n\nImport a Markdown file (for example a soul.md) from Settings → Personas → Import: the whole file becomes the instructions, or use "## Greeting" and "## Examples" sections (User: / Assistant: lines) for the rest. Export writes the same format.`,
+  },
+  {
     title: 'Versions, continuing and backups',
     icon: 'source-branch',
-    body: `Regenerating a reply or editing a message keeps the old one: use ‹ 2/3 › under the message to switch between versions.\n\nIf a reply was stopped or cut off by the length limit, tap ▷ under it (or long-press → Continue) to let the model carry on from where it stopped.\n\nSettings → Backup saves all chats, presets and settings to one file you can keep in Files or Drive, and restores them later (model files aren't included).`,
+    body: `Regenerating a reply or editing a message keeps the old one: use ‹ 2/3 › under the message to switch between versions.\n\nIf a reply was stopped or cut off by the length limit, tap ▷ under it (or long-press → Continue) to let the model carry on from where it stopped.\n\nSettings → Backup saves all chats, personas and settings to one file you can keep in Files or Drive, and restores them later (model files aren't included).`,
   },
   {
     title: 'Performance tips',
