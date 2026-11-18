@@ -165,6 +165,10 @@ Sending, regenerating, continuing, switching chat or model all `await stopCompac
 
 `stopGeneration()` calls `stopCompletion()` immediately. `releaseModel()` stops and awaits any in-flight completion before releasing the context, so a model switch or unload never frees memory under a running completion.
 
+## Personas as files
+
+`lib/personaMarkdown.ts` parses and writes the persona Markdown format. The format is front matter (`name` and completion settings; `#` lines are ignored), then the instructions, then optional `## Greeting` and `## Examples` sections. HTML comments in the body are dropped on import. [`personas/soul.md`](personas/soul.md) is the commented template; `__tests__/personaMarkdown.test.ts` imports it, so a parser change that breaks it fails the tests.
+
 ## Licenses
 
 `yarn licenses` runs `scripts/generate-licenses.mjs`, which writes `constants/licenses.json`. It collects:

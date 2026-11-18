@@ -12,6 +12,8 @@
 //   ## Examples
 //   User: …
 //   Assistant: …
+//
+// <!-- HTML comments --> in the body and `#` lines in the front matter are ignored.
 import { CATALOG_BY_KEY } from './paramCatalog';
 import { parseValue, type ParamSet } from './params';
 import { completionParamsOnly } from './personas';
@@ -70,7 +72,10 @@ function parseExamples(lines: string[]): PersonaExample[] {
 
 export function parsePersonaMarkdown(text: string, fileName: string): PersonaDraft {
   const clean = text.replace(/^﻿/, '').replace(/\r\n?/g, '\n');
-  const { fields, body } = parseFrontMatter(clean);
+  const parsed = parseFrontMatter(clean);
+  const fields = parsed.fields;
+  // HTML comments are notes for whoever edits the file (see personas/soul.md), not part of the persona.
+  const body = parsed.body.replace(/<!--[\s\S]*?-->/g, '');
 
   const sections: Record<string, string[]> = { instructions: [] };
   let current = 'instructions';

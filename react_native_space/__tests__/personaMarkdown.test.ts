@@ -47,3 +47,30 @@ describe('parsePersonaMarkdown', () => {
     expect(parsePersonaMarkdown(serializePersonaMarkdown(x), 'x.md')).toEqual(x);
   });
 });
+
+describe('comments', () => {
+  it('drops HTML comments anywhere in the body, including multi-line ones', () => {
+    const md = '---\nname: X\n# a front-matter note\ntemperature: 0.5\n---\n<!-- what goes here -->\nBe brief.\n<!--\nlonger\nnote\n-->\n\n## Greeting\n<!-- optional -->\nHi.\n';
+    expect(parsePersonaMarkdown(md, 'x.md')).toEqual({ name: 'X', content: 'Be brief.', greeting: 'Hi.', examples: [], params: { temperature: 0.5 } });
+  });
+});
+
+describe('the repo template (personas/soul.md)', () => {
+  const fs = require('fs');
+  const path = require('path');
+  const text: string = fs.readFileSync(path.join(__dirname, '../../personas/soul.md'), 'utf8');
+  const p = parsePersonaMarkdown(text, 'soul.md');
+
+  it('imports with every field filled', () => {
+    expect(p.name).toBe('Wren');
+    expect(p.content.length).toBeGreaterThan(100);
+    expect(p.greeting).toBeTruthy();
+    expect(p.examples).toHaveLength(2);
+    expect(p.params).toEqual({ temperature: 0.7, top_p: 0.9 });
+  });
+
+  it('leaves none of the guidance in the persona', () => {
+    const all = [p.content, p.greeting, ...p.examples.flatMap((e) => [e.user, e.assistant])].join('\n');
+    expect(all).not.toMatch(/<!--|-->|TEMPLATE/);
+  });
+});

@@ -22,7 +22,7 @@ Everything runs on the phone. There are no accounts, no analytics, no ads and no
   - per chat
 - **Paste flags.** Paste a `llama-cli` command from a model card (for example PrismML's Bonsai 2 settings) and the app applies it.
 - Chat history with full-text search, rename, and export to Markdown or text.
-- **Personas.** Instructions plus an optional greeting, example exchanges and sampling settings, picked per chat. Import a `soul.md` (or any Markdown file) as a persona, and export them the same way.
+- **Personas.** Instructions plus an optional greeting, example exchanges and sampling settings, picked per chat. Import a `soul.md` (or any Markdown file) as a persona, and export them the same way. [`personas/soul.md`](personas/soul.md) is a commented template showing every field.
 - Chat templates: auto (from the file), ChatML, Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca, raw.
 - **Long chats keep their thread.** When a chat fills the context window, the model condenses older messages into a summary it keeps reading (you can view it; every message stays saved). **Continue in a new chat** carries the summary and recent messages into a fresh chat with a link back.
 - Dark, light and system themes.
@@ -82,6 +82,7 @@ yarn licenses       # regenerate constants/licenses.json after dependency change
 
 - [`architecture.md`](architecture.md): code layout, data model, the settings layers, the reply pipeline, and conventions.
 - [`ux_design.md`](ux_design.md): screens, interactions, visual design, and the roadmap.
+- [`personas/soul.md`](personas/soul.md): a persona template to copy, with notes on each field.
 
 ## License
 
