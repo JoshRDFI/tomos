@@ -115,6 +115,18 @@ export async function countTokens(text: string): Promise<number> {
   }
 }
 
+/**
+ * Tokens available for the prompt with these completion settings: the same
+ * n_ctx / n_predict arithmetic as generate(), less the template margin.
+ */
+export function promptBudget(params: ParamSet): number {
+  const nCtx = Number(_loadedParams?.n_ctx) || 4096;
+  const requested = Number(params.n_predict);
+  const half = Math.floor(nCtx / 2);
+  const nPredict = Math.max(16, requested > 0 ? Math.min(requested, half) : half);
+  return nCtx - nPredict - 16;
+}
+
 export async function generate(
   model: ModelRecord,
   messages: ChatMessage[],
@@ -127,7 +139,10 @@ export async function generate(
    * then holds the whole reply (old + new); token counts cover the new part.
    */
   prefill?: PartialReply,
+  /** `label` prefixes the [gen] log lines (e.g. "compaction"). */
+  opts?: { label?: string },
 ): Promise<GenerateResult> {
+  const glog = (m: string) => log(opts?.label ? `${opts.label}: ${m}` : m);
   if (!isNative || !_context) {
     throw new Error('Model not loaded');
   }
@@ -185,9 +200,9 @@ export async function generate(
     const now = Date.now();
     if (firstTokenAt === null) {
       firstTokenAt = now;
-      log(`first token after ${now - startedAt} ms`);
+      glog(`first token after ${now - startedAt} ms`);
     }
-    if (++tokens % 200 === 0) log(`${tokens} tokens`);
+    if (++tokens % 200 === 0) glog(`${tokens} tokens`);
     if (typeof data?.token === 'string') st.raw += data.token;
     // A continuation is a raw prompt; llama.rn has no chat parse for it.
     if (displayPrefix === null) {
@@ -243,7 +258,7 @@ export async function generate(
     request = { ...sampling, prompt, stop: [...stop, ...userStop] };
   }
 
-  log(`start: n_ctx=${nCtx} n_predict=${nPredict} prompt≈${fit.tokens} tokens, ${fitted.length} messages, dropped=${dropped}, continue=${!!prefill}`);
+  glog(`start: n_ctx=${nCtx} n_predict=${nPredict} prompt≈${fit.tokens} tokens, ${fitted.length} messages, dropped=${dropped}, continue=${!!prefill}`);
   // Until the first token, llama.cpp is reading the prompt; on a long chat
   // after a restart (nothing cached) that can take minutes on a phone.
   onUpdate({ ...last, status: `Reading the conversation (about ${fit.tokens.toLocaleString()} tokens)…` });
@@ -253,13 +268,13 @@ export async function generate(
   try {
     result = await run;
   } catch (e) {
-    log(`failed: ${String((e as any)?.message ?? e)}`);
+    glog(`failed: ${String((e as any)?.message ?? e)}`);
     throw e;
   } finally {
     _inflight = null;
   }
   const t = result?.timings ?? {};
-  log(`end after ${Date.now() - startedAt} ms: stopped=${stopRef.stop} limit=${!!result?.stopped_limit} context_full=${!!result?.context_full} eos=${!!result?.stopped_eos} prompt_n=${t.prompt_n} prompt_ms=${Math.round(t.prompt_ms ?? 0)} predicted_n=${t.predicted_n} tok/s=${(t.predicted_per_second ?? 0).toFixed(1)}`);
+  glog(`end after ${Date.now() - startedAt} ms: stopped=${stopRef.stop} limit=${!!result?.stopped_limit} context_full=${!!result?.context_full} eos=${!!result?.stopped_eos} prompt_n=${t.prompt_n} prompt_ms=${Math.round(t.prompt_ms ?? 0)} predicted_n=${t.predicted_n} tok/s=${(t.predicted_per_second ?? 0).toFixed(1)}`);
 
   // When stopped, keep exactly what the user saw rather than the full native
   // result, which can include tokens produced after the stop request.

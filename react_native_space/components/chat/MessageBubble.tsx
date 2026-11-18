@@ -104,7 +104,7 @@ function VersionSwitcher({ index, count, onSwitch }: { index: number; count: num
 }
 
 /** "Reading the conversation…" with seconds elapsed, so a slow start doesn't look frozen. */
-function StatusLine({ text }: { text: string }) {
+export function StatusLine({ text, onStop }: { text: string; onStop?: () => void }) {
   const c = useTheme<AppTheme>().appColors;
   const [secs, setSecs] = useState(0);
   useEffect(() => {
@@ -117,6 +117,11 @@ function StatusLine({ text }: { text: string }) {
       <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13, flexShrink: 1 }}>
         {text}{secs >= 3 ? ` ${secs} s` : ''}
       </Text>
+      {onStop && (
+        <Pressable onPress={onStop} accessibilityRole="button" hitSlop={8}>
+          <Text style={{ color: c.brand, fontFamily: fontFamilies.interMedium, fontSize: 13 }}>Stop</Text>
+        </Pressable>
+      )}
     </View>
   );
 }

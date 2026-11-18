@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView } from 'react-native';
 import * as downloader from '@/lib/downloader';
 import { syncDownloads } from '@/lib/downloads';
 import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
@@ -16,8 +16,10 @@ import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
 import { loadSignature } from '@/lib/params';
 import { splitThinking } from '@/lib/thinking';
-import type { SessionRecord, MessageRecord, ModelRecord, Persona } from '@/types';
-import MessageBubble from '@/components/chat/MessageBubble';
+import type { SessionRecord, MessageRecord, ModelRecord, Persona, Summary } from '@/types';
+import MessageBubble, { StatusLine } from '@/components/chat/MessageBubble';
+import { compactIfNeeded } from '@/lib/compactionRunner';
+import { activeSummary } from '@/lib/compaction';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
 import { toChatMessages } from '@/lib/prompt';
@@ -41,6 +43,11 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  // Auto-compaction: summaries of this chat, and the one running now (if any).
+  const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [compacting, setCompacting] = useState(false);
+  const [summaryDialog, setSummaryDialog] = useState<Summary | null>(null);
+  const compactionRef = useRef<Promise<void> | null>(null);
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -188,9 +195,39 @@ export default function ChatScreen() {
     return () => handler.remove();
   }, [drawerOpen]);
 
+  // A running compaction yields to anything the user does next: stop it
+  // (nothing is saved) and wait for the model to be free.
+  const stopCompaction = useCallback(async () => {
+    const p = compactionRef.current;
+    if (!p) return;
+    llama.stopGeneration();
+    await p;
+  }, []);
+
+  const startCompaction = useCallback((sessionId: string, model: ModelRecord) => {
+    if (compactionRef.current) return;
+    compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => setCompacting(true) })
+      .then(async (saved) => {
+        if (saved && sessionIdRef.current === sessionId) setSummaries(await db.getSummaries(sessionId));
+      })
+      .catch((e) => console.warn('Compaction error', e))
+      .finally(() => {
+        compactionRef.current = null;
+        setCompacting(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setSummaries([]); return; }
+    let cancelled = false;
+    db.getSummaries(session.id).then((list) => { if (!cancelled) setSummaries(list); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [session?.id, messages]);
+
   // Switch session
   const switchSession = useCallback(async (id: string) => {
     if (isWeb) return;
+    await stopCompaction();
     const s = await db.getSession(id);
     if (!s) return;
     setSession(s);
@@ -198,11 +235,12 @@ export default function ChatScreen() {
     setMessages(msgs);
     setDrawerOpen(false);
     db.setSetting('lastSessionId', s.id).catch(() => {});
-  }, [isWeb]);
+  }, [isWeb, stopCompaction]);
 
   // New chat
   const newChat = useCallback(async () => {
     if (isWeb) return;
+    await stopCompaction();
     const modelId = modelCtx.loadedModelId ?? (await db.getSetting('lastModelId'));
     const s = await db.createSession(modelId);
     setSession(s);
@@ -210,7 +248,7 @@ export default function ChatScreen() {
     setSessions((prev) => [s, ...prev]);
     setDrawerOpen(false);
     db.setSetting('lastSessionId', s.id).catch(() => {});
-  }, [isWeb, modelCtx.loadedModelId]);
+  }, [isWeb, modelCtx.loadedModelId, stopCompaction]);
 
 
   // Generate a reply to `parentId` (a user message) from the conversation
@@ -256,6 +294,7 @@ export default function ChatScreen() {
       KA.activateKeepAwakeAsync('gen').catch(() => {});
     } catch {}
 
+    let saved = false;
     try {
       const systemPrompt = await db.buildSystemMessage(fresh, currentMsgs);
       const chatMessages = [
@@ -281,6 +320,7 @@ export default function ChatScreen() {
           // Thinking time grows only if the thinking itself was continued.
           thinkingMs: partial.content ? (cont.thinkingMs ?? null) : ((cont.thinkingMs ?? 0) + (result.thinkingMs ?? 0)) || null,
         });
+        saved = true;
       } else if (result.content.length > 0 || result.reasoning.length > 0 || !result.stopped) {
         // Save the reply (skipped if stopped before anything was produced)
         const asstMsg: MessageRecord = {
@@ -298,6 +338,7 @@ export default function ChatScreen() {
           parentId,
         };
         await db.insertMessage(asstMsg);
+        saved = true;
       }
       await db.updateSession(sessionId, { updatedAt: Date.now() });
 
@@ -315,7 +356,9 @@ export default function ChatScreen() {
         KA.deactivateKeepAwake('gen');
       } catch {}
     }
-  }, [modelCtx]);
+    // The chat may be getting long: condense older messages in the background.
+    if (saved) startCompaction(sessionId, model);
+  }, [modelCtx, startCompaction]);
 
   // Send message
   const sendMessage = useCallback(async (text: string) => {
@@ -324,6 +367,7 @@ export default function ChatScreen() {
     if (!model) return;
     generatingRef.current = true;
     try {
+      await stopCompaction();
       // An edit becomes a new version of the edited message; the old version
       // and the replies after it stay available through the version switcher.
       let parentId: string | null;
@@ -359,7 +403,7 @@ export default function ChatScreen() {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions]);
+  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions, stopCompaction]);
 
   // Stop
   const handleStop = useCallback(() => {
@@ -388,12 +432,13 @@ export default function ChatScreen() {
     if (lastMsg?.role !== 'assistant' || !lastMsg.parentId) return;
     generatingRef.current = true;
     try {
+      await stopCompaction();
       await runGeneration(session.id, model, lastMsg.parentId);
     } finally {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
+  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions, stopCompaction]);
 
   // Continue the last reply where it stopped or was cut off.
   const handleContinue = useCallback(async () => {
@@ -404,12 +449,13 @@ export default function ChatScreen() {
     if (lastMsg?.role !== 'assistant' || !lastMsg.parentId || !lastMsg.stopped) return;
     generatingRef.current = true;
     try {
+      await stopCompaction();
       await runGeneration(session.id, model, lastMsg.parentId, lastMsg);
     } finally {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
+  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions, stopCompaction]);
 
   // Show another version of a message (and the conversation that followed it).
   const handleSwitchVersion = useCallback(async (msg: MessageRecord, delta: number) => {
@@ -430,11 +476,12 @@ export default function ChatScreen() {
       setSnack('Stop generating before switching models');
       return;
     }
+    await stopCompaction();
     await db.updateSession(session.id, { modelId: model.id, updatedAt: Date.now() });
     setSession((s) => s ? { ...s, modelId: model.id } : s);
     const prepared = await prepareModel(model, await db.getSession(session.id));
     await modelCtx.loadModel(prepared.model, prepared.load);
-  }, [session, modelCtx]);
+  }, [session, modelCtx, stopCompaction]);
 
   // Rename
   const handleRename = useCallback(async () => {
@@ -524,10 +571,12 @@ export default function ChatScreen() {
   }, [messages, isStreaming, session?.id, modelCtx.loadedModel?.displayName]);
   const displayCount = displayMessages.length;
 
+  const condensed = React.useMemo(() => activeSummary(summaries, messages ?? []), [summaries, messages]);
+
   const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
     const streaming = isStreaming && item.id === '__streaming__';
     const isLastAssistant = item.role === 'assistant' && index === displayCount - 1 && !isStreaming;
-    return (
+    const bubble = (
       <MessageBubble
         message={item}
         isLast={isLastAssistant}
@@ -540,7 +589,19 @@ export default function ChatScreen() {
         onSwitchVersion={!isStreaming && item.versions ? (delta) => handleSwitchVersion(item, delta) : undefined}
       />
     );
-  }, [isStreaming, stream, handleCopy, handleRegenerate, handleContinue, handleSwitchVersion, displayCount]);
+    if (item.id !== condensed?.throughMessageId) return bubble;
+    // Everything up to here reaches the model as the summary.
+    return (
+      <View>
+        {bubble}
+        <Pressable onPress={() => setSummaryDialog(condensed)} accessibilityRole="button" style={styles.condensed}>
+          <View style={[styles.condensedLine, { backgroundColor: c.hairline }]} />
+          <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12 }}>Earlier messages condensed · View summary</Text>
+          <View style={[styles.condensedLine, { backgroundColor: c.hairline }]} />
+        </Pressable>
+      </View>
+    );
+  }, [isStreaming, stream, handleCopy, handleRegenerate, handleContinue, handleSwitchVersion, displayCount, condensed, c]);
 
   const chatTopBar = (
     <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top, height: 56 + insets.top, zIndex: 1 }]}>
@@ -628,6 +689,12 @@ export default function ChatScreen() {
               }}
               renderItem={renderMessage}
               keyExtractor={(item) => item.id}
+              extraData={condensed?.id}
+              ListFooterComponent={compacting ? (
+                <View style={{ paddingHorizontal: spacing.md }}>
+                  <StatusLine text="Condensing earlier messages…" onStop={stopCompaction} />
+                </View>
+              ) : null}
               contentContainerStyle={{ paddingVertical: spacing.xs }}
             />
           </View>
@@ -672,6 +739,21 @@ export default function ChatScreen() {
 
       <Portal>
         {/* Rename Dialog */}
+        <Dialog visible={!!summaryDialog} onDismiss={() => setSummaryDialog(null)}>
+          <Dialog.Title>Summary of earlier messages</Dialog.Title>
+          <Dialog.ScrollArea style={{ maxHeight: 420 }}>
+            <ScrollView contentContainerStyle={{ paddingVertical: 12 }}>
+              <Text selectable style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14, lineHeight: 20 }}>{summaryDialog?.content}</Text>
+              <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12, marginTop: 12 }}>
+                {summaryDialog ? `Written ${new Date(summaryDialog.createdAt).toLocaleString()}${summaryDialog.modelName ? ` by ${summaryDialog.modelName}` : ''}. The model sees this instead of the messages above the divider; they stay saved here.` : ''}
+              </Text>
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setSummaryDialog(null)}>Close</Button>
+          </Dialog.Actions>
+        </Dialog>
+
         <Dialog visible={!!renameDialog} onDismiss={() => setRenameDialog(null)}>
           <Dialog.Title>Rename chat</Dialog.Title>
           <Dialog.Content>
@@ -716,6 +798,8 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  condensed: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: spacing.md, paddingVertical: 10 },
+  condensedLine: { flex: 1, height: StyleSheet.hairlineWidth },
   container: { flex: 1 },
   topBar: { flexDirection: 'row', alignItems: 'center', height: 56, borderBottomWidth: StyleSheet.hairlineWidth },
   modelInfo: { flex: 1 },
