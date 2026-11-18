@@ -161,6 +161,18 @@ export default function ChatSettingsScreen() {
           </>
         )}
 
+        <Button
+          mode="outlined"
+          icon="arrow-right-bold-box-outline"
+          onPress={() => router.navigate({ pathname: '/', params: { continueFrom: sessionId } })}
+          style={{ alignSelf: 'flex-start', marginTop: spacing.sm }}
+        >
+          Continue in a new chat
+        </Button>
+        <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>
+          Starts a new chat with a summary of this one and its latest messages, the same persona and settings, and a link back.
+        </Text>
+
         {/* llama.cpp settings */}
         <Text style={[styles.sectionTitle, { color: c.text, fontFamily: fontFamilies.interSemiBold, marginTop: spacing.md }]}>Settings for this chat</Text>
         <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>

@@ -6,7 +6,7 @@ import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, Tex
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Drawer as DrawerLayout } from 'react-native-drawer-layout';
 import { FlashList } from '@shopify/flash-list';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, typeScale } from '@/constants/theme';
 import { useModelContext } from '@/contexts/ModelContext';
@@ -18,8 +18,9 @@ import { loadSignature } from '@/lib/params';
 import { splitThinking } from '@/lib/thinking';
 import type { SessionRecord, MessageRecord, ModelRecord, Persona, Summary } from '@/types';
 import MessageBubble, { StatusLine } from '@/components/chat/MessageBubble';
-import { compactIfNeeded } from '@/lib/compactionRunner';
-import { activeSummary } from '@/lib/compaction';
+import { compactIfNeeded, prepareContinuation } from '@/lib/compactionRunner';
+import { activeSummary, summariesOnPath, CONTINUE_HINT_AFTER } from '@/lib/compaction';
+import ContinuedChip from '@/components/chat/ContinuedChip';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
 import { toChatMessages } from '@/lib/prompt';
@@ -35,6 +36,7 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const { width: screenWidth } = useWindowDimensions();
   const router = useRouter();
+  const { continueFrom } = useLocalSearchParams<{ continueFrom?: string }>();
   const modelCtx = useModelContext();
   const settings = useSettings();
 
@@ -48,6 +50,8 @@ export default function ChatScreen() {
   const [compacting, setCompacting] = useState(false);
   const [summaryDialog, setSummaryDialog] = useState<Summary | null>(null);
   const compactionRef = useRef<Promise<void> | null>(null);
+  const [continueHint, setContinueHint] = useState<string | null>(null);
+  const [carriedDialog, setCarriedDialog] = useState(false);
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -208,7 +212,16 @@ export default function ChatScreen() {
     if (compactionRef.current) return;
     compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => setCompacting(true) })
       .then(async (saved) => {
-        if (saved && sessionIdRef.current === sessionId) setSummaries(await db.getSummaries(sessionId));
+        if (!saved) return;
+        const list = await db.getSummaries(sessionId);
+        if (sessionIdRef.current === sessionId) setSummaries(list);
+        // Summaries of summaries lose detail: suggest a fresh chat, once per chat.
+        const onPath = summariesOnPath(list, await db.getSessionMessages(sessionId)).length;
+        const key = `continueHint:${sessionId}`;
+        if (onPath >= CONTINUE_HINT_AFTER && !(await db.getSetting(key))) {
+          await db.setSetting(key, '1');
+          if (sessionIdRef.current === sessionId) setContinueHint(sessionId);
+        }
       })
       .catch((e) => console.warn('Compaction error', e))
       .finally(() => {
@@ -249,6 +262,44 @@ export default function ChatScreen() {
     setDrawerOpen(false);
     db.setSetting('lastSessionId', s.id).catch(() => {});
   }, [isWeb, modelCtx.loadedModelId, stopCompaction]);
+
+  // "Continue in a new chat": carry the summary and recent messages over, link back.
+  const continueChat = useCallback(async (fromId: string) => {
+    if (isWeb || generatingRef.current) return;
+    await stopCompaction();
+    const from = await db.getSession(fromId);
+    if (!from) return;
+    generatingRef.current = true;
+    try {
+      const carried = prepareContinuation(fromId, modelCtx.loadedModel, { onStart: () => setCompacting(true) });
+      compactionRef.current = carried.then(() => {}, () => {});
+      let carryOver: string;
+      try {
+        carryOver = await carried;
+      } finally {
+        compactionRef.current = null;
+        setCompacting(false);
+      }
+      const s = await db.createContinuation(from, carryOver);
+      setSession(s);
+      setMessages([]);
+      setEditMode(null);
+      setSessions((prev) => [s, ...prev]);
+      db.setSetting('lastSessionId', s.id).catch(() => {});
+    } catch (e) {
+      setSnack('Couldn\'t continue in a new chat: ' + String((e as any)?.message ?? e));
+    } finally {
+      generatingRef.current = false;
+    }
+  }, [isWeb, stopCompaction, modelCtx.loadedModel]);
+
+  // Chat settings → "Continue in a new chat" navigates here with ?continueFrom=.
+  const handledContinue = useRef<string | null>(null);
+  useEffect(() => {
+    if (!continueFrom || handledContinue.current === continueFrom) return;
+    handledContinue.current = continueFrom;
+    continueChat(continueFrom).finally(() => router.setParams({ continueFrom: undefined }));
+  }, [continueFrom, continueChat, router]);
 
 
   // Generate a reply to `parentId` (a user message) from the conversation
@@ -662,6 +713,13 @@ export default function ChatScreen() {
       <View style={[styles.container, { backgroundColor: c.background }]}>
         {chatTopBar}
         {statusBanner}
+        {!!session?.continuedFromId && (
+          <ContinuedChip
+            fromTitle={sessions.find((x) => x.id === session.continuedFromId)?.title ?? null}
+            onOpen={() => switchSession(session.continuedFromId!)}
+            onShowCarried={() => setCarriedDialog(true)}
+          />
+        )}
         {isWeb && <WebNotice />}
         {!hasMessages && !isStreaming ? (
           <EmptyChat
@@ -754,6 +812,21 @@ export default function ChatScreen() {
           </Dialog.Actions>
         </Dialog>
 
+        <Dialog visible={carriedDialog} onDismiss={() => setCarriedDialog(false)}>
+          <Dialog.Title>Carried over</Dialog.Title>
+          <Dialog.ScrollArea style={{ maxHeight: 420 }}>
+            <ScrollView contentContainerStyle={{ paddingVertical: 12 }}>
+              <Text selectable style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14, lineHeight: 20 }}>{session?.carryOver || 'Nothing was carried over.'}</Text>
+              <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12, marginTop: 12 }}>
+                The model reads this at the start of this chat, until the chat writes its own summary.
+              </Text>
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setCarriedDialog(false)}>Close</Button>
+          </Dialog.Actions>
+        </Dialog>
+
         <Dialog visible={!!renameDialog} onDismiss={() => setRenameDialog(null)}>
           <Dialog.Title>Rename chat</Dialog.Title>
           <Dialog.Content>
@@ -793,6 +866,14 @@ export default function ChatScreen() {
       </Portal>
 
       <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={2000}>{snack}</Snackbar>
+      <Snackbar
+        visible={!!continueHint && continueHint === session?.id}
+        onDismiss={() => setContinueHint(null)}
+        duration={10000}
+        action={{ label: 'Continue', onPress: () => { const id = continueHint; setContinueHint(null); if (id) continueChat(id); } }}
+      >
+        This chat has been condensed several times. Continue in a new chat?
+      </Snackbar>
     </>
   );
 }

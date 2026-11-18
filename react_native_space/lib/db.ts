@@ -435,6 +435,35 @@ export async function createSession(modelId: string | null, opts?: { personaId?:
   return s;
 }
 
+/**
+ * "Continue in a new chat": a new chat that behaves like `from` (model,
+ * persona or custom text, settings), starts with `carryOver`, and links back.
+ * No greeting: the conversation is already under way.
+ */
+export async function createContinuation(from: SessionRecord, carryOver: string): Promise<SessionRecord> {
+  const db = await getDb();
+  const now = Date.now();
+  const s: SessionRecord = {
+    id: uuid(),
+    title: `${from.title} (cont.)`,
+    modelId: from.modelId,
+    systemPromptOverride: from.systemPromptOverride ?? null,
+    paramsOverride: from.paramsOverride ?? null,
+    personaId: from.personaId ?? null,
+    continuedFromId: from.id,
+    carryOver,
+    createdAt: now,
+    updatedAt: now,
+  };
+  if (db) {
+    await db.runAsync(
+      'INSERT INTO sessions (id, title, modelId, systemPromptOverride, paramsOverride, personaId, continuedFromId, carryOver, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [s.id, s.title, s.modelId, s.systemPromptOverride, s.paramsOverride, s.personaId, s.continuedFromId, s.carryOver, s.createdAt, s.updatedAt],
+    );
+  }
+  return s;
+}
+
 async function insertGreeting(sessionId: string, persona: Persona): Promise<void> {
   if (!persona.greeting) return;
   await insertMessage({

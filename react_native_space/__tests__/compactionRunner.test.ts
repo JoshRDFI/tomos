@@ -17,7 +17,7 @@ jest.mock('../lib/modelMeta', () => ({
 
 import * as db from '../lib/db';
 import * as llama from '../lib/llama';
-import { compactIfNeeded } from '../lib/compactionRunner';
+import { compactIfNeeded, prepareContinuation } from '../lib/compactionRunner';
 import { SUMMARY_INSTRUCTION } from '../lib/compaction';
 import type { MessageRecord, ModelRecord } from '../types';
 
@@ -79,4 +79,33 @@ it('strips thinking; empty after stripping saves nothing', async () => {
 
   (llama.generate as jest.Mock).mockResolvedValue(result({ content: '<think>x</think>The summary.' }));
   expect((await compactIfNeeded('s', model))?.content).toBe('The summary.');
+});
+
+describe('prepareContinuation', () => {
+  it('carries the summary and every message after it', async () => {
+    (llama.countTokens as jest.Mock).mockResolvedValue(5); // short chat: no compaction
+    (db.getSummaries as jest.Mock).mockResolvedValue([
+      { id: 'x', sessionId: 's', throughMessageId: 'm3', content: 'Earlier we planned a trip.', tokenCount: 9, modelName: null, createdAt: 1 },
+    ]);
+    const text = await prepareContinuation('s', model);
+    expect(llama.generate).not.toHaveBeenCalled();
+    // Everything after the summary (m4–m11), not just the last 4: nothing between them is lost.
+    expect(text).toBe('Earlier we planned a trip.\n\n' + [4, 5, 6, 7, 8, 9, 10, 11].map((i) => `${i % 2 === 0 ? 'User' : 'Assistant'}: message ${i}`).join('\n'));
+  });
+
+  it('runs compaction first with the 40% trigger when the chat is long', async () => {
+    // 12 × 48 + 48 = 624: under the 70% trigger, over 40%.
+    (llama.countTokens as jest.Mock).mockResolvedValue(40);
+    (llama.generate as jest.Mock).mockResolvedValue(result({ content: 'Fresh summary.' }));
+    const text = await prepareContinuation('s', model);
+    expect(llama.generate).toHaveBeenCalledTimes(1);
+    expect(db.insertSummary).toHaveBeenCalled();
+    expect(text.startsWith('Fresh summary.')).toBe(true);
+  });
+
+  it('works without a loaded model (no compaction)', async () => {
+    const text = await prepareContinuation('s', null);
+    expect(llama.generate).not.toHaveBeenCalled();
+    expect(text).toContain('User: message 10');
+  });
 });

@@ -6,8 +6,9 @@ import { prepareModel } from './modelMeta';
 import { toChatMessages } from './prompt';
 import { splitThinking } from './thinking';
 import {
-  activeSummary, messagesAfter, planCompaction, summaryRequest, SUMMARY_MAX_TEMP, SUMMARY_N_PREDICT,
+  activeSummary, buildCarryOver, COMPACT_TARGET, messagesAfter, planCompaction, summaryRequest, SUMMARY_MAX_TEMP, SUMMARY_N_PREDICT,
 } from './compaction';
+import { estimateTokens } from './personas';
 import type { ModelRecord, Summary } from '@/types';
 
 /**
@@ -76,4 +77,29 @@ export async function compactIfNeeded(
   };
   await db.insertSummary(summary);
   return summary;
+}
+
+/** Budget used for carry-over when no model is loaded (the app's default context). */
+const FALLBACK_BUDGET = 4096 - 2048 - 16;
+
+/**
+ * What "Continue in a new chat" carries over: the chat's summary and the
+ * messages after it, word for word. A long tail is condensed first (40%
+ * trigger) when a model is loaded; anything still too long loses its oldest
+ * messages.
+ */
+export async function prepareContinuation(
+  sessionId: string,
+  model: ModelRecord | null,
+  opts?: { onStart?: () => void },
+): Promise<string> {
+  const fresh = model ? await compactIfNeeded(sessionId, model, { onStart: opts?.onStart, trigger: COMPACT_TARGET }) : null;
+  const path = await db.getSessionMessages(sessionId);
+  const summary = fresh ?? activeSummary(await db.getSummaries(sessionId), path);
+  let budget = FALLBACK_BUDGET;
+  if (model) {
+    const session = await db.getSession(sessionId);
+    budget = llama.promptBudget((await prepareModel(model, session)).completion);
+  }
+  return buildCarryOver(summary?.content ?? null, toChatMessages(messagesAfter(path, summary)), COMPACT_TARGET * budget, estimateTokens);
 }
