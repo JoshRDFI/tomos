@@ -23,6 +23,8 @@ export interface Backup {
   sessions: Row[];
   messages: Row[];
   presets: Row[];
+  /** Compaction summaries (version 2+; optional). */
+  summaries?: Row[];
 }
 
 export class BackupError extends Error {}
@@ -46,10 +48,15 @@ export function parseBackup(text: string): Backup {
       throw new BackupError(`This backup is damaged (${k}).`);
     }
   }
+  if (data.summaries !== undefined && (!Array.isArray(data.summaries) || data.summaries.some((r: unknown) => !r || typeof r !== 'object'))) {
+    throw new BackupError('This backup is damaged (summaries).');
+  }
   const ids = new Set(data.sessions.map((s: Row) => s.id));
   if (data.messages.some((m: Row) => !ids.has(m.sessionId))) {
     throw new BackupError('This backup is damaged (messages without a chat).');
   }
+  // A summary of a chat that isn't in the backup is useless; drop it.
+  if (data.summaries) data.summaries = data.summaries.filter((r: Row) => ids.has(r.sessionId));
   return data as Backup;
 }
 

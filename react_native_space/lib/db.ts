@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
-import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, Persona, PersonaExample, SearchResult } from '@/types';
+import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, Persona, PersonaExample, SearchResult, Summary } from '@/types';
+import { activeSummary } from './compaction';
 import { completionParamsOnly, isChatEmpty, linkExactCopies, pickDefaultPersona, resolveInstructions } from './personas';
 import { composeSystemMessage } from './prompt';
 import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
@@ -104,6 +105,18 @@ async function createTables() {
       createdAt INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS summaries (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      throughMessageId TEXT NOT NULL,
+      content TEXT NOT NULL,
+      tokenCount INTEGER,
+      modelName TEXT,
+      createdAt INTEGER NOT NULL,
+      FOREIGN KEY (sessionId) REFERENCES sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_summaries_session ON summaries(sessionId);
+
     CREATE TABLE IF NOT EXISTS downloads (
       id TEXT PRIMARY KEY,
       repo TEXT NOT NULL,
@@ -134,6 +147,8 @@ async function createTables() {
   }
   const sessionCols = ((await db.getAllAsync('PRAGMA table_info(sessions)')) as { name: string }[]).map((c) => c.name);
   if (!sessionCols.includes('personaId')) await migrateToPersonas(db);
+  if (!sessionCols.includes('continuedFromId')) await db.execAsync('ALTER TABLE sessions ADD COLUMN continuedFromId TEXT');
+  if (!sessionCols.includes('carryOver')) await db.execAsync('ALTER TABLE sessions ADD COLUMN carryOver TEXT');
 
   // FTS triggers
   await db.execAsync(`
@@ -254,16 +269,33 @@ const DEFAULT_SYSTEM_PROMPT = 'You are a helpful, concise assistant.';
  * builds it here, so the chat and its summaries share a prompt prefix.
  */
 export async function buildSystemMessage(session: SessionRecord | null, path: MessageRecord[]): Promise<string> {
-  void path;
+  const summary = session ? activeSummary(await getSummaries(session.id), path) : null;
   const source = resolveInstructions(session, await getAllPersonas(), (await getSetting('defaultSystemPrompt')) ?? DEFAULT_SYSTEM_PROMPT);
   const instructions = source.kind === 'persona' ? source.persona.content : source.text;
   return composeSystemMessage({
     instructions,
     date: (await getSetting('includeDate')) !== '0' ? new Date() : null,
     examples: source.kind === 'persona' ? source.persona.examples : [],
-    summary: null,
-    carryOver: null,
+    summary: summary?.content ?? null,
+    carryOver: session?.carryOver ?? null,
   });
+}
+
+// ── Summaries (auto-compaction) ──
+
+export async function getSummaries(sessionId: string): Promise<Summary[]> {
+  const db = await getDb();
+  if (!db) return [];
+  return (await db.getAllAsync('SELECT * FROM summaries WHERE sessionId = ? ORDER BY createdAt ASC', [sessionId])) as Summary[];
+}
+
+export async function insertSummary(s: Summary): Promise<void> {
+  const db = await getDb();
+  if (!db) return;
+  await db.runAsync(
+    'INSERT INTO summaries (id, sessionId, throughMessageId, content, tokenCount, modelName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    [s.id, s.sessionId, s.throughMessageId, s.content, s.tokenCount, s.modelName, s.createdAt],
+  );
 }
 
 // ── Models ──
@@ -666,6 +698,7 @@ export async function exportBackup(): Promise<Backup> {
     sessions: await all('SELECT * FROM sessions'),
     messages: await all('SELECT * FROM messages ORDER BY createdAt ASC'),
     presets: await all('SELECT * FROM prompt_presets'),
+    summaries: await all('SELECT * FROM summaries'),
   };
 }
 
@@ -688,12 +721,13 @@ export async function restoreBackup(b: Backup): Promise<void> {
       }
     };
 
-    await tx.execAsync('DELETE FROM messages; DELETE FROM sessions; DELETE FROM prompt_presets;');
+    await tx.execAsync('DELETE FROM summaries; DELETE FROM messages; DELETE FROM sessions; DELETE FROM prompt_presets;');
     await tx.runAsync("DELETE FROM settings WHERE key != 'lastModelId'");
     await insertAll('settings', settingsToRestore(b.settings));
     await insertAll('sessions', b.sessions.map((s) => ({ ...s, modelId: s.modelId ? (match.get(String(s.modelId)) ?? null) : null })));
     await insertAll('messages', b.messages);
     await insertAll('prompt_presets', b.presets);
+    await insertAll('summaries', b.summaries ?? []);
     for (const m of b.models) {
       const localId = match.get(String(m.id));
       if (!localId) continue;

@@ -80,3 +80,17 @@ describe('backup versions', () => {
     expect(() => parseBackup(JSON.stringify({ ...valid(), version: 3 }))).toThrow('newer version');
   });
 });
+
+describe('summaries in backups', () => {
+  const v2 = () => ({ ...valid(), version: 2 });
+  it('accepts a v2 backup with summaries', () => {
+    const b = parseBackup(JSON.stringify({ ...v2(), summaries: [{ id: 'u', sessionId: 's1', throughMessageId: 'x', content: 'S', createdAt: 1 }] }));
+    expect(b.summaries).toHaveLength(1);
+  });
+  it('accepts a v2 backup without summaries', () => {
+    expect(parseBackup(JSON.stringify(v2())).summaries).toBeUndefined();
+  });
+  it("rejects summaries that aren't a list", () => {
+    expect(() => parseBackup(JSON.stringify({ ...v2(), summaries: { a: 1 } }))).toThrow('damaged (summaries)');
+  });
+});
