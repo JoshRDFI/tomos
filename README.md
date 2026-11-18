@@ -68,4 +68,21 @@ For a Play Store or long-term build, sign with your own key:
 
 Third-party licenses are listed in the app under **Settings → About & licenses**, generated from the installed dependencies by `yarn licenses`.
 
+### Code adapted from DeepSeek's chat demo
+
+Parts of the chat UI are adapted from DeepSeek's [chat-demo](https://github.com/deepseek-ai/chat-demo) (MIT License, Copyright (c) 2026 DeepSeek), reworked for React Native and this app's data model:
+
+| In `react_native_space/` | Adapted from | What |
+|---|---|---|
+| `lib/markdown.ts` | `src/services/markdown/parse.ts` | Markdown + GFM → syntax tree for replies |
+| `components/chat/Markdown.tsx` | `src/components/markdown/MarkdownAstRenderer.tsx` | Rendering that tree (rewritten for React Native views) |
+| `components/chat/useThrottledText.ts` | `src/components/markdown/useThrottleMarkdownRender.ts` | Throttled re-rendering while a reply streams |
+| `lib/highlight.ts` | `src/services/markdown/highlight.ts` | Code-block language list and aliases |
+| `lib/branches.ts` | `src/services/chat/branches.ts` | Message branching model (versions of replies and edited prompts) |
+| `lib/backup.ts` | `src/services/chat/backup.ts` | Idea for backup files that carry chats and settings but no model |
+
+Each file keeps DeepSeek's notice; the full MIT text is in `lib/markdown.ts` and in the app's licenses screen.
+
 This repository does not yet include a license for the app's own code. `react_native_space/LICENSE` is the Expo template's license, not the app's.
+
+The app icon is the RDF Industries logo (`react_native_space/assets/rdfi-logo.png`). It is not covered by any code license.
