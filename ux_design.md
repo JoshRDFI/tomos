@@ -382,8 +382,8 @@ Shared by Settings, Model settings and Chat settings. Props: the overrides at th
 - **Paste flags dialog:** accepts a llama.cpp command line (e.g. a model card's `llama-cli … --temp 1.0 --top-p 0.95 --presence-penalty 1.0 -c 32768 --chat-template-kwargs '{"enable_thinking":true}'`), with a live preview of what will be applied, invalid values and unknown flags. `-m`, `-p` and similar are ignored; `-c 0` is skipped.
 
 ### 5c. About (app/settings/about.tsx)
-- Card: app name, version (expo-constants), llama.cpp build number and commit (llama.rn `BuildInfo`), and "Runs language models entirely on this phone. Chats, settings and model files never leave the device."
-- **Open-source licenses:** searchable FlashList from `constants/licenses.json`, in sections "On-device inference (native code)", "Fonts", "JavaScript packages". Tap an entry to expand its project link and full license text (selectable, mono). Packages without a license file show their license name and link.
+- Card: the RDF Industries logo (44 dp, on a white disc in both themes) beside the app name and "by RDF Industries"; version (expo-constants), llama.cpp build number and commit (llama.rn `BuildInfo`); "Runs language models entirely on this phone. Chats, settings and model files never leave the device."; "© 2026 RDF Industries, Inc. Open source under the Apache License 2.0."; and a "Source code on GitHub" link. Name, publisher, license and repo URL come from `constants/app.ts`.
+- **Open-source licenses:** searchable FlashList from `constants/licenses.json`, in sections "On-device inference (native code)", "Fonts", "Adapted source code", "JavaScript packages". Tap an entry to expand its project link and full license text (selectable, mono). Packages without a license file show their license name and link.
 
 ### 6. Presets (app/settings/presets.tsx)
 - List of presets: name plus a 2-line content preview.

@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { View, StyleSheet, Pressable, TextInput, Platform, Linking } from 'react-native';
+import { View, StyleSheet, Pressable, TextInput, Platform, Linking, Image } from 'react-native';
 import { Text, useTheme, Icon } from 'react-native-paper';
 import { Stack } from 'expo-router';
 import { FlashList } from '@shopify/flash-list';
 import Constants from 'expo-constants';
 import type { AppTheme } from '@/constants/theme';
+import { APP_NAME, COPYRIGHT, CODE_LICENSE, REPO_URL } from '@/constants/app';
 import { spacing, fontFamilies, radii } from '@/constants/theme';
 
 interface LicenseItem {
@@ -68,11 +69,23 @@ export default function AboutScreen() {
   const header = (
     <View style={{ gap: spacing.sm, paddingBottom: spacing.md }}>
       <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.hairline }]}>
-        <Text style={{ color: c.text, fontFamily: fontFamilies.interSemiBold, fontSize: 18 }}>{Constants.expoConfig?.name ?? 'LLM Chat'}</Text>
+        <View style={styles.titleRow}>
+          <Image source={require('@/assets/rdfi-logo-small.png')} style={[styles.logo, { backgroundColor: c.logoBackdrop }]} accessibilityLabel="RDF Industries logo" />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: c.text, fontFamily: fontFamilies.interSemiBold, fontSize: 18 }}>{APP_NAME}</Text>
+            <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>by RDF Industries</Text>
+          </View>
+        </View>
         <Text style={[styles.meta, { color: c.textSecondary }]}>Version {version}</Text>
         {llamaBuild && <Text style={[styles.meta, { color: c.textSecondary }]}>llama.cpp {llamaBuild}</Text>}
         <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14, marginTop: 8 }}>
           Runs language models entirely on this phone. Chats, settings and model files never leave the device.
+        </Text>
+        <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13, marginTop: 8 }}>
+          {COPYRIGHT}. Open source under the {CODE_LICENSE}.
+        </Text>
+        <Text onPress={() => Linking.openURL(REPO_URL)} accessibilityRole="link" style={{ color: c.brand, fontFamily: fontFamilies.inter, fontSize: 13, marginTop: 4 }}>
+          Source code on GitHub
         </Text>
       </View>
       <Text style={{ color: c.text, fontFamily: fontFamilies.interSemiBold, fontSize: 16, marginTop: spacing.sm }}>Open-source licenses</Text>
@@ -144,6 +157,8 @@ export default function AboutScreen() {
 }
 
 const styles = StyleSheet.create({
+  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
+  logo: { width: 44, height: 44, borderRadius: 22 },
   card: { padding: 16, borderRadius: radii.card, borderWidth: StyleSheet.hairlineWidth, gap: 2 },
   meta: { fontFamily: fontFamilies.mono, fontSize: 12 },
   search: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, fontSize: 14 },

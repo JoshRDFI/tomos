@@ -37,7 +37,7 @@ export function parseBackup(text: string): Backup {
   } catch {
     throw new BackupError("This file isn't a backup (not valid JSON).");
   }
-  if (!data || data.format !== BACKUP_FORMAT) throw new BackupError("This file isn't an LLM Chat backup.");
+  if (!data || data.format !== BACKUP_FORMAT) throw new BackupError("This file isn't a backup from this app.");
   if (typeof data.version !== 'number' || data.version > BACKUP_VERSION) {
     throw new BackupError('This backup was made by a newer version of the app.');
   }

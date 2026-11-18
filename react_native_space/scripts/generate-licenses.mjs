@@ -155,6 +155,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.`;
 const adapted = [
   { name: 'DeepSeek chat demo (markdown, branching, backup)', version: '', license: 'MIT', url: 'https://github.com/deepseek-ai/chat-demo', text: DEEPSEEK_MIT },
+  { name: 'Expo app template (project scaffolding)', version: '', license: 'MIT', url: 'https://github.com/expo/expo', text: fromFile(path.join(root, 'third_party', 'expo-template-MIT.txt')) },
 ];
 
 // Deduplicate identical texts (most MIT files differ only by copyright line,
