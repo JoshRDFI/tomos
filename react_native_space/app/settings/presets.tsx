@@ -3,9 +3,10 @@ import { View, StyleSheet, Platform, ScrollView, Pressable } from 'react-native'
 import { Text, FAB, useTheme, Dialog, Portal, Button, TextInput as PaperInput, Snackbar, IconButton, Menu, Card, Divider } from 'react-native-paper';
 import { Stack } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
+import { blankPersona } from '@/lib/personas';
 import { spacing, radii, fontFamilies, typeScale } from '@/constants/theme';
 import * as db from '@/lib/db';
-import type { PromptPreset } from '@/types';
+import type { Persona } from '@/types';
 
 const STARTERS = [
   { name: 'Concise assistant', content: 'You are a helpful, concise assistant. Answer briefly and directly.' },
@@ -18,13 +19,13 @@ export default function PresetsScreen() {
   const c = theme.appColors;
   const isWeb = Platform.OS === 'web';
 
-  const [presets, setPresets] = useState<PromptPreset[]>([]);
-  const [editDialog, setEditDialog] = useState<PromptPreset | null>(null);
+  const [presets, setPresets] = useState<Persona[]>([]);
+  const [editDialog, setEditDialog] = useState<Persona | null>(null);
   const [isNew, setIsNew] = useState(false);
   const [editName, setEditName] = useState('');
   const [editContent, setEditContent] = useState('');
   const [nameError, setNameError] = useState('');
-  const [deleteDialog, setDeleteDialog] = useState<PromptPreset | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<Persona | null>(null);
   const [snack, setSnack] = useState('');
   const [menuId, setMenuId] = useState<string | null>(null);
 
@@ -41,10 +42,10 @@ export default function PresetsScreen() {
     setEditName('');
     setEditContent('');
     setNameError('');
-    setEditDialog({ id: '', name: '', content: '', createdAt: 0 });
+    setEditDialog(blankPersona({ id: '', name: '', content: '', createdAt: 0 }));
   };
 
-  const openEdit = (p: PromptPreset) => {
+  const openEdit = (p: Persona) => {
     setIsNew(false);
     setEditName(p.name);
     setEditContent(p.content);
@@ -58,7 +59,7 @@ export default function PresetsScreen() {
     if (dup) { setNameError('A preset with this name already exists'); return; }
 
     if (isNew) {
-      await db.insertPreset({ id: db.generateId(), name: editName.trim(), content: editContent, createdAt: Date.now() });
+      await db.insertPreset(blankPersona({ id: db.generateId(), name: editName.trim(), content: editContent, createdAt: Date.now() }));
     } else if (editDialog) {
       await db.updatePreset(editDialog.id, { name: editName.trim(), content: editContent });
     }
@@ -78,7 +79,7 @@ export default function PresetsScreen() {
   const addStarter = async (starter: typeof STARTERS[number]) => {
     const exists = await db.presetNameExists(starter.name);
     if (exists) { setSnack('Preset already exists'); return; }
-    await db.insertPreset({ id: db.generateId(), name: starter.name, content: starter.content, createdAt: Date.now() });
+    await db.insertPreset(blankPersona({ id: db.generateId(), name: starter.name, content: starter.content, createdAt: Date.now() }));
     refresh();
     setSnack('Preset added');
   };

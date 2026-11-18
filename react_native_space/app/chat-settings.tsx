@@ -3,10 +3,11 @@ import { View, StyleSheet, Platform, ScrollView } from 'react-native';
 import { Text, Switch, useTheme, Button, Menu, TextInput as PaperInput, Dialog, Portal, Snackbar } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
+import { blankPersona } from '@/lib/personas';
 import { spacing, fontFamilies } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
 import * as db from '@/lib/db';
-import type { SessionRecord, PromptPreset } from '@/types';
+import type { SessionRecord, Persona } from '@/types';
 import ParamEditor from '@/components/params/ParamEditor';
 import { ensureFileParams } from '@/lib/modelMeta';
 import { parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from '@/lib/params';
@@ -25,7 +26,7 @@ export default function ChatSettingsScreen() {
   const [overrides, setOverrides] = useState<ParamSet>({});
   const [inherited, setInherited] = useState<ResolvedParams>(() => resolveParams({}));
   const [modelName, setModelName] = useState<string | null>(null);
-  const [presets, setPresets] = useState<PromptPreset[]>([]);
+  const [presets, setPresets] = useState<Persona[]>([]);
   const [presetMenu, setPresetMenu] = useState(false);
   const [saveDialog, setSaveDialog] = useState(false);
   const [saveName, setSaveName] = useState('');
@@ -104,7 +105,7 @@ export default function ChatSettingsScreen() {
     if (!saveName.trim()) { setSaveError('Name is required'); return; }
     const exists = await db.presetNameExists(saveName.trim());
     if (exists) { setSaveError('A preset with this name already exists'); return; }
-    await db.insertPreset({ id: db.generateId(), name: saveName.trim(), content: promptText, createdAt: Date.now() });
+    await db.insertPreset(blankPersona({ id: db.generateId(), name: saveName.trim(), content: promptText, createdAt: Date.now() }));
     setSaveDialog(false);
     setSaveName('');
     setSaveError('');

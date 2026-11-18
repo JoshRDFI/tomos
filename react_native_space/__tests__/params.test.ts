@@ -120,3 +120,13 @@ describe('extractFileParams', () => {
     expect(extractFileParams({ 'general.name': 'X' })).toEqual({});
   });
 });
+
+describe('persona layer', () => {
+  it('sits between the model and the chat', () => {
+    const r = resolveParams({ model: { temperature: 0.5 }, persona: { temperature: 0.9 }, chat: {} });
+    expect(r.values.temperature).toBe(0.9);
+    expect(r.sources.temperature).toBe('persona');
+    const c = resolveParams({ persona: { temperature: 0.9 }, chat: { temperature: 0.2 } });
+    expect(c.values.temperature).toBe(0.2);
+  });
+});

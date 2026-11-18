@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, PromptPreset, SearchResult } from '@/types';
+import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, Persona, SearchResult } from '@/types';
 import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
@@ -461,19 +461,20 @@ export async function searchMessages(query: string): Promise<SearchResult[]> {
 
 // ── Presets ──
 
-export async function getAllPresets(): Promise<PromptPreset[]> {
+export async function getAllPresets(): Promise<Persona[]> {
   const db = await getDb();
   if (!db) return [];
-  return (await db.getAllAsync('SELECT * FROM prompt_presets ORDER BY createdAt DESC')) as PromptPreset[];
+  const rows = (await db.getAllAsync('SELECT * FROM prompt_presets ORDER BY createdAt DESC')) as any[];
+  return rows.map((r) => ({ greeting: null, examples: [], params: {}, updatedAt: r.createdAt, ...r }));
 }
 
-export async function insertPreset(p: PromptPreset): Promise<void> {
+export async function insertPreset(p: Persona): Promise<void> {
   const db = await getDb();
   if (!db) return;
   await db.runAsync('INSERT INTO prompt_presets (id, name, content, createdAt) VALUES (?, ?, ?, ?)', [p.id, p.name, p.content, p.createdAt]);
 }
 
-export async function updatePreset(id: string, fields: Partial<PromptPreset>): Promise<void> {
+export async function updatePreset(id: string, fields: Partial<Persona>): Promise<void> {
   const db = await getDb();
   if (!db) return;
   const keys = Object.keys(fields).filter((k) => k !== 'id');

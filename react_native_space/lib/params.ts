@@ -5,13 +5,14 @@ export type ParamValue = number | boolean | string | unknown[] | { [k: string]: 
 export type ParamSet = Record<string, ParamValue>;
 
 /** Where an effective value came from, lowest priority first. */
-export type ParamSource = 'app' | 'global' | 'file' | 'model' | 'chat';
+export type ParamSource = 'app' | 'global' | 'file' | 'model' | 'persona' | 'chat';
 
 export const SOURCE_LABELS: Record<ParamSource, string> = {
   app: 'App default',
   global: 'All chats',
   file: 'Model file',
   model: 'This model',
+  persona: 'Persona',
   chat: 'This chat',
 };
 
@@ -72,6 +73,7 @@ export interface LayeredParams {
   global?: ParamSet;
   file?: ParamSet;
   model?: ParamSet;
+  persona?: ParamSet;
   chat?: ParamSet;
 }
 
@@ -80,7 +82,7 @@ export interface ResolvedParams {
   sources: Record<string, ParamSource>;
 }
 
-const LAYER_ORDER: ParamSource[] = ['app', 'global', 'file', 'model', 'chat'];
+const LAYER_ORDER: ParamSource[] = ['app', 'global', 'file', 'model', 'persona', 'chat'];
 
 /** Merge layers; later layers win. */
 export function resolveParams(layers: LayeredParams): ResolvedParams {

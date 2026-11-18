@@ -6,7 +6,7 @@ import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, radii } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useModelContext } from '@/contexts/ModelContext';
-import type { ModelRecord, ThemeMode, PromptPreset } from '@/types';
+import type { ModelRecord, ThemeMode, Persona } from '@/types';
 import * as db from '@/lib/db';
 import ParamEditor from '@/components/params/ParamEditor';
 import { parseParamSet, resolveParams, type ParamSet } from '@/lib/params';
@@ -21,7 +21,7 @@ export default function SettingsScreen() {
   const { isGenerating } = useModelContext();
   const isWeb = Platform.OS === 'web';
 
-  const [presets, setPresets] = useState<PromptPreset[]>([]);
+  const [presets, setPresets] = useState<Persona[]>([]);
   const [presetMenu, setPresetMenu] = useState(false);
   const [promptText, setPromptText] = useState(settings.defaultSystemPrompt);
   const [globalParams, setGlobalParams] = useState<ParamSet>({});

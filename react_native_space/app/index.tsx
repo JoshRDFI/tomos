@@ -21,6 +21,7 @@ import type { SessionRecord, MessageRecord, ModelRecord } from '@/types';
 import MessageBubble from '@/components/chat/MessageBubble';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
+import { toChatMessages } from '@/lib/prompt';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
 
@@ -249,12 +250,7 @@ export default function ChatScreen() {
       if ((await db.getSetting('includeDate')) !== '0') systemPrompt = withDate(systemPrompt, new Date());
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
-        // Thinking isn't sent back to the model, only answers. Replies saved
-        // before thinking was split out still carry their tags; strip them.
-        ...currentMsgs.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.role === 'assistant' && !m.reasoning ? splitThinking(m.content ?? '').answer : (m.content ?? ''),
-        })),
+        ...toChatMessages(currentMsgs),
       ];
 
       const result = await llama.generate(model, chatMessages, completion, setStream, partial);

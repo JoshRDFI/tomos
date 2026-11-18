@@ -1,3 +1,5 @@
+import type { ParamSet } from '@/lib/params';
+
 export interface ModelRecord {
   id: string;
   displayName: string;
@@ -25,6 +27,12 @@ export interface SessionRecord {
   paramsOverride: string | null; // JSON ParamSet (overrides for this chat)
   /** Which version of the first message is shown. */
   rootMessageId?: string | null;
+  /** The persona this chat uses (null: custom text or the default system prompt). */
+  personaId?: string | null;
+  /** The chat this one continues ("Continue in a new chat"). */
+  continuedFromId?: string | null;
+  /** What was carried over from that chat: its summary and last exchanges. */
+  carryOver?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -49,12 +57,36 @@ export interface MessageRecord {
   selectedChildId?: string | null;
   /** Other versions of this message (computed when loading; not stored). */
   versions?: { ids: string[]; index: number };
+  /** 'greeting': a persona's opening message. */
+  kind?: 'greeting' | null;
 }
 
-export interface PromptPreset {
+export interface PersonaExample {
+  user: string;
+  assistant: string;
+}
+
+/** A named bundle picked per chat. `content` is the instructions (system prompt). */
+export interface Persona {
   id: string;
   name: string;
   content: string;
+  greeting: string | null;
+  examples: PersonaExample[];
+  /** Per-completion settings only (no load-time keys). */
+  params: ParamSet;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A model-written summary standing in for the path messages up to `throughMessageId`. */
+export interface Summary {
+  id: string;
+  sessionId: string;
+  throughMessageId: string;
+  content: string;
+  tokenCount: number | null;
+  modelName: string | null;
   createdAt: number;
 }
 
