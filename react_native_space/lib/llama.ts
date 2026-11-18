@@ -33,6 +33,8 @@ export async function loadModel(model: ModelRecord, loadParams: ParamSet): Promi
 export async function releaseModel(): Promise<void> {
   if (_context) {
     if (_inflight) {
+      // Marks the result as stopped, so nothing treats a cut-off reply as finished.
+      _stopRef.stop = true;
       interrupt(_context);
       try { await _inflight; } catch {}
     }
@@ -139,8 +141,12 @@ export async function generate(
    * then holds the whole reply (old + new); token counts cover the new part.
    */
   prefill?: PartialReply,
-  /** `label` prefixes the [gen] log lines (e.g. "compaction"). */
-  opts?: { label?: string },
+  /**
+   * `label` prefixes the [gen] log lines (e.g. "compaction"). `stopRef` is the
+   * caller's own stop flag, so a stop requested before the completion starts
+   * still counts.
+   */
+  opts?: { label?: string; stopRef?: { stop: boolean } },
 ): Promise<GenerateResult> {
   const glog = (m: string) => log(opts?.label ? `${opts.label}: ${m}` : m);
   if (!isNative || !_context) {
@@ -150,7 +156,7 @@ export async function generate(
     throw new Error('A response is already being generated');
   }
 
-  _stopRef = { stop: false };
+  _stopRef = opts?.stopRef ?? { stop: false };
   const stopRef = _stopRef;
   const ctx = _context;
 
@@ -261,6 +267,10 @@ export async function generate(
   glog(`start: n_ctx=${nCtx} n_predict=${nPredict} prompt≈${fit.tokens} tokens, ${fitted.length} messages, dropped=${dropped}, continue=${!!prefill}`);
   // Until the first token, llama.cpp is reading the prompt; on a long chat
   // after a restart (nothing cached) that can take minutes on a phone.
+  if (stopRef.stop) {
+    glog('stopped before starting');
+    return { content: '', reasoning: '', thinkingMs: null, tokenCount: 0, tokensPerSec: 0, stopped: true, cutOff: false, droppedMessages: dropped };
+  }
   onUpdate({ ...last, status: `Reading the conversation (about ${fit.tokens.toLocaleString()} tokens)…` });
   const run = ctx.completion(request, onData);
   _inflight = run;

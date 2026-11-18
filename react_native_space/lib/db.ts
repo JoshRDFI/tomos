@@ -270,12 +270,14 @@ const DEFAULT_SYSTEM_PROMPT = 'You are a helpful, concise assistant.';
  */
 export async function buildSystemMessage(session: SessionRecord | null, path: MessageRecord[]): Promise<string> {
   const summary = session ? activeSummary(await getSummaries(session.id), path) : null;
+  const greeting = path[0]?.kind === 'greeting' ? path[0].content : null;
   const source = resolveInstructions(session, await getAllPersonas(), (await getSetting('defaultSystemPrompt')) ?? DEFAULT_SYSTEM_PROMPT);
   const instructions = source.kind === 'persona' ? source.persona.content : source.text;
   return composeSystemMessage({
     instructions,
     date: (await getSetting('includeDate')) !== '0' ? new Date() : null,
     examples: source.kind === 'persona' ? source.persona.examples : [],
+    greeting,
     summary: summary?.content ?? null,
     carryOver: session?.carryOver ?? null,
   });

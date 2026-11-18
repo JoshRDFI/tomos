@@ -6,7 +6,7 @@ import { prepareModel } from './modelMeta';
 import { toChatMessages } from './prompt';
 import { splitThinking } from './thinking';
 import {
-  activeSummary, buildCarryOver, COMPACT_TARGET, messagesAfter, planCompaction, summaryRequest, SUMMARY_MAX_TEMP, SUMMARY_N_PREDICT,
+  activeSummary, buildCarryOver, promptPath, COMPACT_TARGET, planCompaction, summaryRequest, SUMMARY_MAX_TEMP, SUMMARY_N_PREDICT,
 } from './compaction';
 import { estimateTokens } from './personas';
 import type { ModelRecord, Summary } from '@/types';
@@ -19,12 +19,14 @@ import type { ModelRecord, Summary } from '@/types';
 export async function compactIfNeeded(
   sessionId: string,
   model: ModelRecord,
-  opts?: { onStart?: () => void; trigger?: number },
+  opts?: { onStart?: () => void; trigger?: number; cancel?: { stop: boolean } },
 ): Promise<Summary | null> {
+  const cancel = opts?.cancel ?? { stop: false };
   const session = await db.getSession(sessionId);
   if (!session) return null;
   const path = await db.getSessionMessages(sessionId);
-  const after = messagesAfter(path, activeSummary(await db.getSummaries(sessionId), path));
+  // Exactly the messages the chat prompt sends after the system message.
+  const after = promptPath(path, await db.getSummaries(sessionId));
   if (after.length === 0) return null;
 
   // The same system message as the chat's own prompt, so the request shares its prefix.
@@ -39,10 +41,12 @@ export async function compactIfNeeded(
     budget: llama.promptBudget(completion),
     trigger: opts?.trigger,
   });
-  if (!plan) return null;
+  if (!plan || cancel.stop) return null;
 
   opts?.onStart?.();
   const temp = Number(completion.temperature);
+  // Some templates read thinking from chat_template_kwargs; turn it off there too.
+  const kwargs = completion.chat_template_kwargs;
   let result;
   try {
     result = await llama.generate(
@@ -51,18 +55,23 @@ export async function compactIfNeeded(
       {
         ...completion,
         enable_thinking: false,
+        ...(kwargs && typeof kwargs === 'object' ? { chat_template_kwargs: { ...(kwargs as object), enable_thinking: false } } : {}),
         n_predict: SUMMARY_N_PREDICT,
         temperature: Math.min(Number.isFinite(temp) ? temp : 0.8, SUMMARY_MAX_TEMP),
       },
       () => {},
       undefined,
-      { label: 'compaction' },
+      { label: 'compaction', stopRef: cancel },
     );
   } catch (e) {
     console.warn('Compaction failed', e);
     return null;
   }
-  if (result.stopped) return null;
+  // Only a complete summary of every condensed message is worth keeping: not
+  // one that was stopped, hit the length limit, ran on a model swapped in
+  // meanwhile, or had messages dropped to fit.
+  if (result.stopped || cancel.stop || result.cutOff || result.droppedMessages > 0) return null;
+  if (llama.getLoadedModelId() !== model.id) return null;
   const text = splitThinking(result.content).answer.trim();
   if (!text) return null;
 
@@ -91,9 +100,9 @@ const FALLBACK_BUDGET = 4096 - 2048 - 16;
 export async function prepareContinuation(
   sessionId: string,
   model: ModelRecord | null,
-  opts?: { onStart?: () => void },
+  opts?: { onStart?: () => void; cancel?: { stop: boolean } },
 ): Promise<string> {
-  const fresh = model ? await compactIfNeeded(sessionId, model, { onStart: opts?.onStart, trigger: COMPACT_TARGET }) : null;
+  const fresh = model ? await compactIfNeeded(sessionId, model, { onStart: opts?.onStart, trigger: COMPACT_TARGET, cancel: opts?.cancel }) : null;
   const path = await db.getSessionMessages(sessionId);
   const summary = fresh ?? activeSummary(await db.getSummaries(sessionId), path);
   let budget = FALLBACK_BUDGET;
@@ -101,5 +110,5 @@ export async function prepareContinuation(
     const session = await db.getSession(sessionId);
     budget = llama.promptBudget((await prepareModel(model, session)).completion);
   }
-  return buildCarryOver(summary?.content ?? null, toChatMessages(messagesAfter(path, summary)), COMPACT_TARGET * budget, estimateTokens);
+  return buildCarryOver(summary?.content ?? null, toChatMessages(promptPath(path, summary ? [summary] : [])), COMPACT_TARGET * budget, estimateTokens);
 }

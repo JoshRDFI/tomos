@@ -6,6 +6,7 @@ import type { ChatMessage, MessageRecord, PersonaExample } from '@/types';
 export const EXAMPLES_HEADER = 'Examples of how you reply:';
 export const SUMMARY_HEADER = 'Summary of the earlier part of this conversation:';
 export const CARRY_OVER_HEADER = 'Earlier conversation (continued from another chat):';
+export const GREETING_HEADER = 'Your first message in this conversation was:';
 
 export function formatExamples(examples: PersonaExample[]): string {
   if (!examples.length) return '';
@@ -21,12 +22,15 @@ export function composeSystemMessage(p: {
   instructions: string;
   date: Date | null;
   examples: PersonaExample[];
+  /** A persona greeting: here rather than as a leading assistant turn, which some templates reject. */
+  greeting?: string | null;
   summary: string | null;
   carryOver: string | null;
 }): string {
   const blocks = [p.date ? withDate(p.instructions, p.date) : p.instructions.trim()];
   const examples = formatExamples(p.examples);
   if (examples) blocks.push(examples);
+  if (p.greeting) blocks.push(`${GREETING_HEADER}\n${p.greeting}`);
   if (p.summary) blocks.push(`${SUMMARY_HEADER}\n${p.summary}`);
   else if (p.carryOver) blocks.push(`${CARRY_OVER_HEADER}\n${p.carryOver}`);
   return blocks.filter(Boolean).join('\n\n');

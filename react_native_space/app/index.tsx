@@ -19,7 +19,7 @@ import { splitThinking } from '@/lib/thinking';
 import type { SessionRecord, MessageRecord, ModelRecord, Persona, Summary } from '@/types';
 import MessageBubble, { StatusLine } from '@/components/chat/MessageBubble';
 import { compactIfNeeded, prepareContinuation } from '@/lib/compactionRunner';
-import { activeSummary, summariesOnPath, CONTINUE_HINT_AFTER } from '@/lib/compaction';
+import { activeSummary, promptPath, summariesOnPath, CONTINUE_HINT_AFTER } from '@/lib/compaction';
 import ContinuedChip from '@/components/chat/ContinuedChip';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
@@ -50,6 +50,8 @@ export default function ChatScreen() {
   const [compacting, setCompacting] = useState(false);
   const [summaryDialog, setSummaryDialog] = useState<Summary | null>(null);
   const compactionRef = useRef<Promise<void> | null>(null);
+  // Set to stop the running compaction, even before its request has started.
+  const compactionCancel = useRef<{ stop: boolean }>({ stop: false });
   const [continueHint, setContinueHint] = useState<string | null>(null);
   const [carriedDialog, setCarriedDialog] = useState(false);
   const [models, setModels] = useState<ModelRecord[]>([]);
@@ -204,13 +206,16 @@ export default function ChatScreen() {
   const stopCompaction = useCallback(async () => {
     const p = compactionRef.current;
     if (!p) return;
+    compactionCancel.current.stop = true;
     llama.stopGeneration();
     await p;
   }, []);
 
   const startCompaction = useCallback((sessionId: string, model: ModelRecord) => {
     if (compactionRef.current) return;
-    compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => setCompacting(true) })
+    const cancel = { stop: false };
+    compactionCancel.current = cancel;
+    compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => setCompacting(true), cancel })
       .then(async (saved) => {
         if (!saved) return;
         const list = await db.getSummaries(sessionId);
@@ -271,7 +276,9 @@ export default function ChatScreen() {
     if (!from) return;
     generatingRef.current = true;
     try {
-      const carried = prepareContinuation(fromId, modelCtx.loadedModel, { onStart: () => setCompacting(true) });
+      const cancel = { stop: false };
+      compactionCancel.current = cancel;
+      const carried = prepareContinuation(fromId, modelCtx.loadedModel, { onStart: () => setCompacting(true), cancel });
       compactionRef.current = carried.then(() => {}, () => {});
       let carryOver: string;
       try {
@@ -350,7 +357,8 @@ export default function ChatScreen() {
       const systemPrompt = await db.buildSystemMessage(fresh, currentMsgs);
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
-        ...toChatMessages(currentMsgs),
+        // Messages a summary covers reach the model as that summary instead.
+        ...toChatMessages(promptPath(currentMsgs, await db.getSummaries(sessionId))),
       ];
 
       const result = await llama.generate(model, chatMessages, completion, setStream, partial);

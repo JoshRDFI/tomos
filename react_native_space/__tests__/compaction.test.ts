@@ -1,4 +1,5 @@
 import {
+  promptPath,
   activeSummary, buildCarryOver, messagesAfter, planCompaction, summariesOnPath, summaryRequest, SUMMARY_INSTRUCTION,
 } from '@/lib/compaction';
 import { PER_MESSAGE_OVERHEAD } from '@/lib/contextWindow';
@@ -88,5 +89,25 @@ describe('buildCarryOver', () => {
   });
   it('works without a summary', () => {
     expect(buildCarryOver(null, recent.slice(2), 1000, chars)).toBe('User: three\nAssistant: four');
+  });
+});
+
+describe('promptPath (what the chat prompt sends after the system message)', () => {
+  const m = (id: string, role: 'user' | 'assistant', kind: 'greeting' | null = null) => ({ id, role, kind });
+  it('leaves out the messages the active summary covers', () => {
+    const p = [m('a', 'user'), m('b', 'assistant'), m('c', 'user'), m('d', 'assistant')];
+    expect(promptPath(p, [sum('s1', 'b', 1)]).map((x) => x.id)).toEqual(['c', 'd']);
+  });
+  it('sends everything when no summary is on the path', () => {
+    const p = [m('a', 'user'), m('b', 'assistant')];
+    expect(promptPath(p, [sum('s1', 'zz', 1)]).map((x) => x.id)).toEqual(['a', 'b']);
+  });
+  it('leaves out a leading greeting (it goes in the system message)', () => {
+    const p = [m('g', 'assistant', 'greeting'), m('a', 'user'), m('b', 'assistant')];
+    expect(promptPath(p, []).map((x) => x.id)).toEqual(['a', 'b']);
+  });
+  it('keeps an ordinary leading assistant message', () => {
+    const p = [m('x', 'assistant'), m('a', 'user')];
+    expect(promptPath(p, []).map((x) => x.id)).toEqual(['x', 'a']);
   });
 });

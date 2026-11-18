@@ -19,6 +19,12 @@ describe('composeSystemMessage', () => {
     expect(s).toContain('Summary of the earlier part of this conversation:\nS');
     expect(s).not.toContain('CARRY');
   });
+  it('a greeting goes in the system message, after examples and before the summary', () => {
+    const s = composeSystemMessage({ ...base, examples: [{ user: 'u', assistant: 'a' }], greeting: 'Hi there!', summary: 'S' });
+    expect(s).toContain('Your first message in this conversation was:\nHi there!');
+    expect(s.indexOf('Examples of how you reply:')).toBeLessThan(s.indexOf('Your first message'));
+    expect(s.indexOf('Your first message')).toBeLessThan(s.indexOf('Summary of the earlier part'));
+  });
   it('carry-over when no summary, after examples', () => {
     const s = composeSystemMessage({ ...base, examples: [{ user: 'u', assistant: 'a' }], carryOver: 'C' });
     expect(s.indexOf('Examples of how you reply:')).toBeGreaterThan(-1);

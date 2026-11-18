@@ -40,6 +40,17 @@ export function messagesAfter<T extends { id: string }>(path: T[], summary: Summ
  * Which of `counts`/`roles` (the messages after the summary) to condense:
  * indexes 0..throughIndex. Null when under the trigger or nothing can go.
  */
+/**
+ * The path messages the chat prompt sends after the system message: those
+ * after the active summary, without a leading persona greeting (that goes in
+ * the system message; some templates reject a conversation that opens with
+ * an assistant turn).
+ */
+export function promptPath<T extends { id: string; kind?: string | null }>(path: T[], summaries: Summary[]): T[] {
+  const after = messagesAfter(path, activeSummary(summaries, path));
+  return after[0]?.kind === 'greeting' ? after.slice(1) : after;
+}
+
 export function planCompaction(o: {
   fixedTokens: number;
   counts: number[];

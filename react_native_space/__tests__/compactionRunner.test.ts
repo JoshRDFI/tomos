@@ -10,6 +10,7 @@ jest.mock('../lib/llama', () => ({
   countTokens: jest.fn(),
   promptBudget: jest.fn(() => 1000),
   generate: jest.fn(),
+  getLoadedModelId: jest.fn(() => 'm'),
 }));
 jest.mock('../lib/modelMeta', () => ({
   prepareModel: jest.fn((model: any) => Promise.resolve({ model, load: {}, completion: { temperature: 0.8, n_predict: 1024 } })),
@@ -54,7 +55,7 @@ it('writes a summary through the last condensed message', async () => {
   expect(messages[messages.length - 1]).toEqual({ role: 'user', content: SUMMARY_INSTRUCTION });
   expect(params).toMatchObject({ enable_thinking: false, n_predict: 400, temperature: 0.5 });
   expect(prefill).toBeUndefined();
-  expect(opts).toEqual({ label: 'compaction' });
+  expect(opts).toEqual(expect.objectContaining({ label: 'compaction' }));
   expect(db.insertSummary).toHaveBeenCalledWith(expect.objectContaining({
     sessionId: 's', content: 'A short summary.', modelName: 'Qwen', throughMessageId: s!.throughMessageId,
   }));
@@ -108,4 +109,67 @@ describe('prepareContinuation', () => {
     expect(llama.generate).not.toHaveBeenCalled();
     expect(text).toContain('User: message 10');
   });
+});
+
+describe('compaction that must save nothing', () => {
+  beforeEach(() => (llama.countTokens as jest.Mock).mockResolvedValue(60));
+
+  it('cancelled before the summary request starts: no request, nothing saved', async () => {
+    const cancel = { stop: false };
+    (llama.countTokens as jest.Mock).mockImplementation(async () => { cancel.stop = true; return 60; });
+    expect(await compactIfNeeded('s', model, { cancel })).toBeNull();
+    expect(llama.generate).not.toHaveBeenCalled();
+    expect(db.insertSummary).not.toHaveBeenCalled();
+  });
+
+  it('passes its cancel token to generate as the stop flag', async () => {
+    const cancel = { stop: false };
+    (llama.generate as jest.Mock).mockImplementation(async () => { cancel.stop = true; return result(); });
+    expect(await compactIfNeeded('s', model, { cancel })).toBeNull();
+    expect((llama.generate as jest.Mock).mock.calls[0][5]).toEqual({ label: 'compaction', stopRef: cancel });
+    expect(db.insertSummary).not.toHaveBeenCalled();
+  });
+
+  it('cut off by the length limit', async () => {
+    (llama.generate as jest.Mock).mockResolvedValue(result({ cutOff: true }));
+    expect(await compactIfNeeded('s', model)).toBeNull();
+    expect(db.insertSummary).not.toHaveBeenCalled();
+  });
+
+  it('the model was swapped while it ran', async () => {
+    (llama.generate as jest.Mock).mockImplementation(async () => {
+      (llama.getLoadedModelId as jest.Mock).mockReturnValue('other');
+      return result();
+    });
+    expect(await compactIfNeeded('s', model)).toBeNull();
+    expect(db.insertSummary).not.toHaveBeenCalled();
+    (llama.getLoadedModelId as jest.Mock).mockReturnValue('m');
+  });
+
+  it('messages being condensed did not fit, so the request was cut short', async () => {
+    (llama.generate as jest.Mock).mockResolvedValue(result({ droppedMessages: 1 }));
+    expect(await compactIfNeeded('s', model)).toBeNull();
+    expect(db.insertSummary).not.toHaveBeenCalled();
+  });
+});
+
+it('turns thinking off in chat_template_kwargs too', async () => {
+  (llama.countTokens as jest.Mock).mockResolvedValue(60);
+  (llama.generate as jest.Mock).mockResolvedValue(result());
+  const modelMeta = require('../lib/modelMeta');
+  (modelMeta.prepareModel as jest.Mock).mockResolvedValueOnce({ model, load: {}, completion: { temperature: 0.3, chat_template_kwargs: { enable_thinking: true, x: 1 } } });
+  await compactIfNeeded('s', model);
+  expect((llama.generate as jest.Mock).mock.calls[0][2].chat_template_kwargs).toEqual({ enable_thinking: false, x: 1 });
+});
+
+it('a leading greeting is not condensed as a turn; the summary still ends on the right message', async () => {
+  (llama.countTokens as jest.Mock).mockResolvedValue(60);
+  (llama.generate as jest.Mock).mockResolvedValue(result());
+  const greeting = { ...msg(99), id: 'g', role: 'assistant', content: 'Hello!', kind: 'greeting' };
+  (db.getSessionMessages as jest.Mock).mockResolvedValue([greeting, ...Array.from({ length: 12 }, (_, i) => msg(i))]);
+  const s = await compactIfNeeded('s', model);
+  const messages = (llama.generate as jest.Mock).mock.calls[0][1];
+  expect(messages[1]).toEqual({ role: 'user', content: 'message 0' });
+  const condensed = messages.slice(1, -1);
+  expect(condensed[condensed.length - 1].content).toBe(`message ${Number(s!.throughMessageId.slice(1))}`);
 });
