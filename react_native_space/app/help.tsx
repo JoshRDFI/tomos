@@ -39,17 +39,32 @@ const sections = [
   {
     title: 'Thinking models',
     icon: 'lightbulb-outline',
-    body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off, add the "Thinking" setting and switch it off (for one chat, a model, or all chats). Setting "Reasoning format" to None shows the raw output, tags included.`,
+    body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off for one chat, use the Thinking switch in Chat settings. For a model or all chats, add the "Thinking" setting in its settings and switch it off.\n\nAbliterated and "heretic" models (versions with their refusals removed) tend to work best with thinking off: their thinking is more likely to wander or run long. Turning it off for that model (Settings → its model → Thinking) saves doing it in every chat. Setting "Reasoning format" to None shows the raw output, tags included.`,
+  },
+  {
+    title: 'Personas',
+    icon: 'account-voice',
+    body: `A persona gives the model a personality: instructions (who it is and how it replies), plus an optional greeting, example exchanges, and its own settings such as temperature. Pick one for each chat from the chip on a new chat or in Chat settings, and choose the one new chats start with in Settings.\n\nExamples shape the tone more than descriptions do, especially on small models: two or three short exchanges in the voice you want work better than a paragraph about it.\n\nA persona is sent with every message, so a long one leaves less room for the conversation. The editor shows roughly how many tokens it uses.\n\nImport a Markdown file (for example a soul.md) from Settings → Personas → Import: the whole file becomes the instructions, or use "## Greeting" and "## Examples" sections (User: / Assistant: lines) for the rest. Notes between <!-- and --> are ignored, so a file can explain itself. The project's source code has a commented template, personas/soul.md. Export writes the same format.`,
+  },
+  {
+    title: 'Repetition',
+    icon: 'repeat-variant',
+    body: `Small local models sometimes repeat themselves: the same phrases in every reply, or a "continued" story that retells the last part with small changes. Three settings help. Add them in Chat settings → Settings for this chat, or on a model in Settings so every chat with it gets them:\n\n• DRY multiplier (on at 0.8 by default): penalises repeating any run of words from anywhere in the chat. Try 1.0–1.5 if a model still copies sentences. DRY base, allowed length and last N only matter while it's above 0.\n• Presence penalty (0 by default): discourages words already used, which catches reworded repeats that DRY misses. Try 1.0, up to 1.5; Qwen recommends this for its models. Higher makes the writing stiff.\n• Repeat last N (512 by default): how far back presence, frequency and repeat penalty look, about the last reply or two. Raise it to 1024 if a model repeats from further back.\n\nA model copies its own earlier replies: once a closing line appears twice, it becomes the pattern. Long-press a reply → Edit reply to cut a repeated line before you answer, or regenerate it, and ask in the persona's instructions for what you want, e.g. "End on action or dialogue, never a recap or a question. Don't repeat what the user said."\n\nHow you ask matters too. "Continue" invites a retelling; "Now the storm hits" or "Tell it from her side" gives the model something new to write. Abliterated and "heretic" models repeat more than their originals.`,
+  },
+  {
+    title: 'Long chats',
+    icon: 'text-box-multiple-outline',
+    body: `A model can only read so much at once (its context window). When a chat gets close to that, the app asks the model to condense the oldest messages into a short summary, right after a reply. You'll see "Condensing earlier messages…" for a minute or so; you can keep typing, and sending a message stops it.\n\nA divider marks where the summary starts; tap it to read the summary. Every message stays saved and visible: only what the model reads changes. If you edit a message that was condensed, the summary no longer applies to that version.\n\nTo start fresh but keep the thread, use Chat settings → Continue in a new chat. The new chat starts with the summary and your last exchange, the same persona and settings, and a link back to the old chat.`,
   },
   {
     title: 'Versions, continuing and backups',
     icon: 'source-branch',
-    body: `Regenerating a reply or editing a message keeps the old one: use ‹ 2/3 › under the message to switch between versions.\n\nIf a reply was stopped or cut off by the length limit, tap ▷ under it (or long-press → Continue) to let the model carry on from where it stopped.\n\nSettings → Backup saves all chats, presets and settings to one file you can keep in Files or Drive, and restores them later (model files aren't included).`,
+    body: `Regenerating a reply or editing a message or reply (long-press → Edit) keeps the old one: use ‹ 2/3 › under the message to switch between versions.\n\nIf a reply was stopped or cut off by the length limit, tap ▷ under it (or long-press → Continue) to let the model carry on from where it stopped.\n\nSettings → Backup saves all chats, personas and settings to one file you can keep in Files or Drive, and restores them later (model files aren't included).`,
   },
   {
     title: 'Performance tips',
     icon: 'speedometer',
-    body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
+    body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Context length is 8192 by default (less if the model was trained for less). Lower it to 4096 if a model loads slowly or the app runs out of memory; raise it for fewer summaries in long chats.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
   },
 ];
 

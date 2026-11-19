@@ -1,4 +1,6 @@
 import {
+  appDefaultsFor,
+  thinkingEnabled, LEGACY_DEFAULTS,
   APP_DEFAULTS, extractFileParams, loadSignature, parseCliFlags, parseParamSet,
   parseValue, resolveParams, splitParams,
 } from '@/lib/params';
@@ -118,5 +120,40 @@ describe('extractFileParams', () => {
   it('returns {} when there is no metadata', () => {
     expect(extractFileParams(null)).toEqual({});
     expect(extractFileParams({ 'general.name': 'X' })).toEqual({});
+  });
+});
+
+describe('persona layer', () => {
+  it('sits between the model and the chat', () => {
+    const r = resolveParams({ model: { temperature: 0.5 }, persona: { temperature: 0.9 }, chat: {} });
+    expect(r.values.temperature).toBe(0.9);
+    expect(r.sources.temperature).toBe('persona');
+    const c = resolveParams({ persona: { temperature: 0.9 }, chat: { temperature: 0.2 } });
+    expect(c.values.temperature).toBe(0.2);
+  });
+});
+
+describe('thinkingEnabled (the chat-settings Thinking switch)', () => {
+  const inherited = (v?: boolean) => resolveParams(v === undefined ? {} : { global: { enable_thinking: v } });
+  it('on by default', () => expect(thinkingEnabled({}, inherited())).toBe(true));
+  it('follows the inherited setting', () => expect(thinkingEnabled({}, inherited(false))).toBe(false));
+  it("the chat's own setting wins", () => expect(thinkingEnabled({ enable_thinking: true }, inherited(false))).toBe(true));
+});
+
+describe('default repetition settings', () => {
+  it('DRY is on by default at 0.8', () => expect(resolveParams({}).values.dry_multiplier).toBe(0.8));
+  it('penalties look back 512 tokens by default, past the last reply', () => expect(resolveParams({}).values.penalty_last_n).toBe(512));
+});
+
+describe('default context length', () => {
+  it('is 8192', () => expect(resolveParams({}).values.n_ctx).toBe(8192));
+  it("is capped at what the model was trained for", () => expect(appDefaultsFor(4096).n_ctx).toBe(4096));
+  it('a model trained longer still gets 8192', () => expect(appDefaultsFor(40960).n_ctx).toBe(8192));
+  it('unknown training context: 8192', () => expect(appDefaultsFor(null).n_ctx).toBe(8192));
+  it('the cap is only on the default: a chosen value still wins', () => {
+    expect(resolveParams({ app: appDefaultsFor(4096), model: { n_ctx: 16384 } }).values.n_ctx).toBe(16384);
+  });
+  it("the first version's defaults stay as they were (no DRY)", () => {
+    expect(LEGACY_DEFAULTS).toEqual({ temperature: 0.7, top_p: 0.9, top_k: 40, min_p: 0.05, penalty_repeat: 1.1, n_predict: 1024, n_ctx: 4096, n_threads: 6 });
   });
 });

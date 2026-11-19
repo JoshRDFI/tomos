@@ -33,6 +33,8 @@ export async function loadModel(model: ModelRecord, loadParams: ParamSet): Promi
 export async function releaseModel(): Promise<void> {
   if (_context) {
     if (_inflight) {
+      // Marks the result as stopped, so nothing treats a cut-off reply as finished.
+      _stopRef.stop = true;
       interrupt(_context);
       try { await _inflight; } catch {}
     }
@@ -64,7 +66,13 @@ export async function loadModelInfo(filePath: string): Promise<Record<string, an
 
 let _stopRef: { stop: boolean } = { stop: false };
 
+/** Generation milestones in logcat (tag ReactNativeJS), for diagnosing stalls. */
+function log(msg: string) {
+  console.log(`[gen] ${msg}`);
+}
+
 export function stopGeneration() {
+  log(`stop requested (running: ${!!_inflight})`);
   _stopRef.stop = true;
   // Actually interrupt native generation; the completion promise then resolves
   // promptly with what was produced so far.
@@ -99,7 +107,7 @@ export interface GenerateResult {
 
 export type { StreamView } from './thinking';
 
-async function countTokens(text: string): Promise<number> {
+export async function countTokens(text: string): Promise<number> {
   try {
     const res = await _context.tokenize(text);
     return res?.tokens?.length ?? Math.ceil(text.length / 3);
@@ -107,6 +115,18 @@ async function countTokens(text: string): Promise<number> {
     // Conservative fallback (~3 chars per token)
     return Math.ceil(text.length / 3);
   }
+}
+
+/**
+ * Tokens available for the prompt with these completion settings: the same
+ * n_ctx / n_predict arithmetic as generate(), less the template margin.
+ */
+export function promptBudget(params: ParamSet): number {
+  const nCtx = Number(_loadedParams?.n_ctx) || 4096;
+  const requested = Number(params.n_predict);
+  const half = Math.floor(nCtx / 2);
+  const nPredict = Math.max(16, requested > 0 ? Math.min(requested, half) : half);
+  return nCtx - nPredict - 16;
 }
 
 export async function generate(
@@ -121,7 +141,14 @@ export async function generate(
    * then holds the whole reply (old + new); token counts cover the new part.
    */
   prefill?: PartialReply,
+  /**
+   * `label` prefixes the [gen] log lines (e.g. "compaction"). `stopRef` is the
+   * caller's own stop flag, so a stop requested before the completion starts
+   * still counts.
+   */
+  opts?: { label?: string; stopRef?: { stop: boolean } },
 ): Promise<GenerateResult> {
+  const glog = (m: string) => log(opts?.label ? `${opts.label}: ${m}` : m);
   if (!isNative || !_context) {
     throw new Error('Model not loaded');
   }
@@ -129,7 +156,7 @@ export async function generate(
     throw new Error('A response is already being generated');
   }
 
-  _stopRef = { stop: false };
+  _stopRef = opts?.stopRef ?? { stop: false };
   const stopRef = _stopRef;
   const ctx = _context;
 
@@ -172,10 +199,16 @@ export async function generate(
   let firstTokenAt: number | null = null;
   let answerAt: number | null = null;
   let last: StreamView = { thinking: '', answer: '', thinkingOpen: false };
+  const startedAt = Date.now();
+  let tokens = 0;
   const onData = (data: any) => {
     if (stopRef.stop) return;
     const now = Date.now();
-    if (firstTokenAt === null) firstTokenAt = now;
+    if (firstTokenAt === null) {
+      firstTokenAt = now;
+      glog(`first token after ${now - startedAt} ms`);
+    }
+    if (++tokens % 200 === 0) glog(`${tokens} tokens`);
     if (typeof data?.token === 'string') st.raw += data.token;
     // A continuation is a raw prompt; llama.rn has no chat parse for it.
     if (displayPrefix === null) {
@@ -231,14 +264,27 @@ export async function generate(
     request = { ...sampling, prompt, stop: [...stop, ...userStop] };
   }
 
+  glog(`start: n_ctx=${nCtx} n_predict=${nPredict} prompt≈${fit.tokens} tokens, ${fitted.length} messages, dropped=${dropped}, continue=${!!prefill}`);
+  // Until the first token, llama.cpp is reading the prompt; on a long chat
+  // after a restart (nothing cached) that can take minutes on a phone.
+  if (stopRef.stop) {
+    glog('stopped before starting');
+    return { content: '', reasoning: '', thinkingMs: null, tokenCount: 0, tokensPerSec: 0, stopped: true, cutOff: false, droppedMessages: dropped };
+  }
+  onUpdate({ ...last, status: `Reading the conversation (about ${fit.tokens.toLocaleString()} tokens)…` });
   const run = ctx.completion(request, onData);
   _inflight = run;
   let result: any;
   try {
     result = await run;
+  } catch (e) {
+    glog(`failed: ${String((e as any)?.message ?? e)}`);
+    throw e;
   } finally {
     _inflight = null;
   }
+  const t = result?.timings ?? {};
+  glog(`end after ${Date.now() - startedAt} ms: stopped=${stopRef.stop} limit=${!!result?.stopped_limit} context_full=${!!result?.context_full} eos=${!!result?.stopped_eos} prompt_n=${t.prompt_n} prompt_ms=${Math.round(t.prompt_ms ?? 0)} predicted_n=${t.predicted_n} tok/s=${(t.predicted_per_second ?? 0).toFixed(1)}`);
 
   // When stopped, keep exactly what the user saw rather than the full native
   // result, which can include tokens produced after the stop request.

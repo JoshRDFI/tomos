@@ -8,7 +8,7 @@ import { parseHfLink, type HfLink } from '@/lib/hfLink';
 import { fetchQuantizedRepos, fetchRepo, fileUrl, ggufRows, HfError, rangeReader, type GgufRow, type QuantizedRepo } from '@/lib/hfApi';
 import { checkCompatibility, GgufError, readGgufHeader } from '@/lib/ggufHeader';
 import { formatBytes, memoryHint, parseQuantFromFilename } from '@/lib/gguf';
-import { startDownload } from '@/lib/downloads';
+import { pendingDownloadBytes, startDownload } from '@/lib/downloads';
 
 const GATED_TEXT = "This model needs a Hugging Face login, which the app doesn't support yet. Download it in a browser and use Add GGUF model.";
 const HEADROOM = 500 * 1024 * 1024;
@@ -64,7 +64,7 @@ export default function DownloadScreen() {
     setLastLink(link);
     setView({ kind: 'loading', repo: link.repo });
     try {
-      const info = await fetchRepo(link.repo);
+      const info = await fetchRepo(link.repo, link.revision);
       const rows = ggufRows(info.siblings);
       if (rows.length > 0) {
         const selected = link.file ? rows.find((r) => r.files.some((f) => f.path === link.file))?.key ?? null : null;
@@ -75,7 +75,10 @@ export default function DownloadScreen() {
       setView({ kind: 'bases', repo: info.id, repos: await fetchQuantizedRepos(info.id) });
     } catch (e) {
       if (e instanceof HfError) {
-        if (e.kind === 'not_found') return setView({ kind: 'error', message: `No public model at ${link.repo}. Check the link.`, retry: false });
+        if (e.kind === 'not_found') {
+          const where = link.revision ? `${link.repo} (version ${link.revision})` : link.repo;
+          return setView({ kind: 'error', message: `No public model at ${where}. Check the link.`, retry: false });
+        }
         if (e.kind === 'gated') return setView({ kind: 'error', message: GATED_TEXT, retry: false });
         if (e.kind === 'network') return setView({ kind: 'error', message: "Couldn't reach Hugging Face.", retry: true });
       }
@@ -108,8 +111,13 @@ export default function DownloadScreen() {
     try {
       const { Paths } = await import('expo-file-system');
       const free = Paths.availableDiskSpace;
-      if (free > 0 && free < row.totalBytes + HEADROOM) {
-        setSnack(`Not enough storage (needs ${formatBytes(row.totalBytes + HEADROOM)}).`);
+      // Downloads already running will take their share of the space too.
+      const pending = await pendingDownloadBytes().catch(() => 0);
+      const needed = row.totalBytes + pending + HEADROOM;
+      if (free > 0 && free < needed) {
+        setSnack(pending > 0
+          ? `Not enough storage (needs ${formatBytes(needed)}, including ${formatBytes(pending)} for downloads in progress).`
+          : `Not enough storage (needs ${formatBytes(needed)}).`);
         return;
       }
     } catch {}

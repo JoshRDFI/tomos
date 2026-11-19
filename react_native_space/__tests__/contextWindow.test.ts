@@ -44,4 +44,10 @@ describe('fitToContext', () => {
     const r = await fitToContext(m, 1000, 200, count);
     expect(r.messages).toEqual([m[2]]);
   });
+  it('reports the estimated size of the kept prompt', async () => {
+    const m = [msg('system', 50), msg('user', 400), msg('assistant', 400), msg('user', 50)];
+    const r = await fitToContext(m, 1000, 300, count);
+    // keeps system + last user: (50 + 8) + (50 + 8)
+    expect(r.tokens).toBe(116);
+  });
 });

@@ -71,6 +71,8 @@ export interface StreamView {
   answer: string;
   /** Still inside the thinking block. */
   thinkingOpen: boolean;
+  /** Shown before the first token, e.g. while the conversation is being read. */
+  status?: string;
 }
 
 /**

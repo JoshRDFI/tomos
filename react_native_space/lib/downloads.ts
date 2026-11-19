@@ -81,11 +81,7 @@ export async function startDownload(o: { repo: string; sha: string; row: GgufRow
       });
       parts.push({ dmId, path: f.path, size: f.size, status: 'active' });
     }
-  } catch (e) {
-    if (parts.length) await downloader.remove(parts.map((p) => p.dmId)).catch(() => {});
-    throw e;
-  }
-  const d: DownloadRecord = {
+    const d: DownloadRecord = {
     id,
     repo: o.repo,
     revision: o.sha,
@@ -95,11 +91,16 @@ export async function startDownload(o: { repo: string; sha: string; row: GgufRow
     totalBytes: o.row.totalBytes,
     status: 'active',
     wifiOnly: o.wifiOnly,
-    createdAt: Date.now(),
-    error: null,
-  };
-  await db.insertDownload(d);
-  return d;
+      createdAt: Date.now(),
+      error: null,
+    };
+    await db.insertDownload(d);
+    return d;
+  } catch (e) {
+    // Don't leave downloads running that nothing tracks.
+    if (parts.length) await downloader.remove(parts.map((p) => p.dmId)).catch(() => {});
+    throw e;
+  }
 }
 
 /** Re-queue failed parts from zero; finished parts are kept. */
@@ -108,20 +109,46 @@ export async function retryFailed(d: DownloadRecord): Promise<void> {
   // Drop the old entries (and any partial files) so the new ones can use the same names.
   if (failed.length) await downloader.remove(failed.map((p) => p.dmId)).catch(() => {});
   const parts: DownloadPart[] = [];
-  for (const [i, p] of d.parts.entries()) {
-    if (p.status !== 'failed') {
-      parts.push(p);
-      continue;
+  const queued: number[] = [];
+  try {
+    for (const [i, p] of d.parts.entries()) {
+      if (p.status !== 'failed') {
+        parts.push(p);
+        continue;
+      }
+      const dmId = await downloader.enqueue({
+        url: fileUrl(d.repo, d.revision, p.path),
+        relativePath: relativePath(d.id, p.path),
+        title: partTitle(d.label, i + 1, d.parts.length),
+        wifiOnly: d.wifiOnly,
+      });
+      queued.push(dmId);
+      parts.push({ ...p, dmId, status: 'active' });
     }
-    const dmId = await downloader.enqueue({
-      url: fileUrl(d.repo, d.revision, p.path),
-      relativePath: relativePath(d.id, p.path),
-      title: partTitle(d.label, i + 1, d.parts.length),
-      wifiOnly: d.wifiOnly,
-    });
-    parts.push({ ...p, dmId, status: 'active' });
+    await db.updateDownload(d.id, { status: 'active', error: null, parts });
+  } catch (e) {
+    // The record stays failed; the next Retry queues those parts again.
+    if (queued.length) await downloader.remove(queued).catch(() => {});
+    throw e;
   }
-  await db.updateDownload(d.id, { status: 'active', error: null, parts });
+}
+
+/** Bytes active downloads still need to fetch (for the free-space check). Pure. */
+export function remainingBytes(downloads: DownloadRecord[], infos: DlInfo[]): number {
+  const byId = new Map(infos.map((i) => [i.id, i]));
+  let n = 0;
+  for (const d of downloads) {
+    if (d.status !== 'active') continue;
+    for (const p of d.parts) if (p.status === 'active') n += Math.max(0, p.size - (byId.get(p.dmId)?.bytesSoFar ?? 0));
+  }
+  return n;
+}
+
+/** remainingBytes() for what's in progress right now. */
+export async function pendingDownloadBytes(): Promise<number> {
+  const list = (await db.getActiveDownloads()).filter((d) => d.status === 'active');
+  const ids = list.flatMap((d) => d.parts.filter((p) => p.status === 'active').map((p) => p.dmId));
+  return remainingBytes(list, ids.length ? await downloader.query(ids) : []);
 }
 
 function deleteFolder(id: string) {

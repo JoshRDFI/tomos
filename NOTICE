@@ -1,0 +1,22 @@
+LLM Chat
+Copyright 2026 RDF Industries, Inc.
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Trademarks: the RDF Industries name and logo (including the app icon,
+react_native_space/assets/rdfi-logo.png and the android-icon-*.png, icon.png
+and favicon.png files made from it) are not licensed under the Apache License.
+Section 6 of that license does not grant permission to use them. If you
+distribute your own build, use your own name, icon and application ID.
+
+This product includes software developed by others:
+
+- Parts of the chat UI are adapted from DeepSeek's chat-demo
+  (https://github.com/deepseek-ai/chat-demo), MIT License,
+  Copyright (c) 2026 DeepSeek. Each adapted file keeps DeepSeek's notice.
+- The project scaffolding comes from the Expo app template, MIT License,
+  Copyright (c) 2015-present 650 Industries, Inc. (aka Expo). The full text
+  is in react_native_space/third_party/expo-template-MIT.txt.
+
+Licenses of the libraries the app ships with are listed in the app under
+Settings > About & licenses.

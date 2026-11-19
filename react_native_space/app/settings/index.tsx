@@ -2,11 +2,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, StyleSheet, ScrollView, Platform, Pressable } from 'react-native';
 import { Text, SegmentedButtons, useTheme, Button, Menu, TextInput as PaperInput, Icon, Switch, Dialog, Portal, Snackbar } from 'react-native-paper';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
+import PersonaPicker, { personaChoiceLabel } from '@/components/chat/PersonaPicker';
+import { importPersonaFromFile } from '@/lib/personaImport';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, radii } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
 import { useModelContext } from '@/contexts/ModelContext';
-import type { ModelRecord, ThemeMode, PromptPreset } from '@/types';
+import type { ModelRecord, ThemeMode, Persona } from '@/types';
 import * as db from '@/lib/db';
 import ParamEditor from '@/components/params/ParamEditor';
 import { parseParamSet, resolveParams, type ParamSet } from '@/lib/params';
@@ -21,14 +23,16 @@ export default function SettingsScreen() {
   const { isGenerating } = useModelContext();
   const isWeb = Platform.OS === 'web';
 
-  const [presets, setPresets] = useState<PromptPreset[]>([]);
-  const [presetMenu, setPresetMenu] = useState(false);
+  const [presets, setPresets] = useState<Persona[]>([]);
+  const [defaultPersonaId, setDefaultPersonaId] = useState<string | null>(null);
   const [promptText, setPromptText] = useState(settings.defaultSystemPrompt);
   const [globalParams, setGlobalParams] = useState<ParamSet>({});
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [snack, setSnack] = useState('');
   const [backupBusy, setBackupBusy] = useState(false);
   const [restoreCandidate, setRestoreCandidate] = useState<Backup | null>(null);
+
+  const defaultChoice: db.PersonaChoice = defaultPersonaId && presets.some((p) => p.id === defaultPersonaId) ? { kind: 'persona', id: defaultPersonaId } : { kind: 'none' };
 
   const handleBackup = useCallback(async () => {
     setBackupBusy(true);
@@ -82,7 +86,8 @@ export default function SettingsScreen() {
       await db.restoreBackup(backup);
       await settings.reload();
       setGlobalParams(await db.getGlobalParams());
-      setPresets(await db.getAllPresets());
+      setPresets(await db.getAllPersonas());
+      setDefaultPersonaId((await db.getSetting('defaultPersonaId')) || null);
       setModels(await db.getAllModels());
       setSnack('Backup restored');
     } catch (e) {
@@ -95,7 +100,8 @@ export default function SettingsScreen() {
   useFocusEffect(
     useCallback(() => {
       if (isWeb) return;
-      db.getAllPresets().then(setPresets).catch(() => {});
+      db.getAllPersonas().then(setPresets).catch(() => {});
+      db.getSetting('defaultPersonaId').then((v) => setDefaultPersonaId(v || null)).catch(() => {});
       db.getAllModels().then(setModels).catch(() => {});
     }, [isWeb]),
   );
@@ -147,30 +153,48 @@ export default function SettingsScreen() {
           ]}
         />
 
-        {/* Default system prompt */}
-        <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>System prompt</Text>
-        <Text style={[styles.note, { color: c.textSecondary }]}>Used by every chat unless the chat sets its own.</Text>
-        <PaperInput
-          value={promptText}
-          onChangeText={(t) => { setPromptText(t); settings.setDefaultSystemPrompt(t); }}
-          mode="outlined"
-          multiline
-          numberOfLines={4}
-          style={{ backgroundColor: c.surfaceRaised }}
-        />
-        <View style={{ flexDirection: 'row', gap: 8 }}>
-          <Menu
-            visible={presetMenu}
-            onDismiss={() => setPresetMenu(false)}
-            anchor={<Button mode="outlined" onPress={() => setPresetMenu(true)} compact>Load preset</Button>}
-          >
-            {presets.map((p) => (
-              <Menu.Item key={p.id} title={p.name} onPress={() => { setPromptText(p.content); settings.setDefaultSystemPrompt(p.content); setPresetMenu(false); }} />
-            ))}
-            {presets.length === 0 && <Menu.Item title="No presets yet" disabled />}
-          </Menu>
-          <Button mode="outlined" onPress={() => router.push('/settings/presets')} compact>Manage presets</Button>
+        {/* What new chats start with */}
+        <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>New chats use</Text>
+        <Text style={[styles.note, { color: c.textSecondary }]}>Applies to chats you start from now on; each chat can change it in its own settings.</Text>
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          <PersonaPicker
+            value={defaultChoice}
+            personas={presets}
+            allowCustom={false}
+            onChange={(choice) => {
+              const v = choice.kind === 'persona' ? choice.id : null;
+              setDefaultPersonaId(v);
+              db.setSetting('defaultPersonaId', v ?? '').catch(() => {});
+            }}
+            onImport={async () => {
+              // The imported persona becomes the one new chats use.
+              const r = await importPersonaFromFile();
+              if (!r) return;
+              if ('error' in r) { setSnack(r.error); return; }
+              setPresets(await db.getAllPersonas());
+              setDefaultPersonaId(r.persona.id);
+              await db.setSetting('defaultPersonaId', r.persona.id);
+              setSnack(`Imported ${r.persona.name}; new chats use it`);
+            }}
+            anchor={(open) => (
+              <Button mode="outlined" onPress={open} icon="account-voice" compact>{personaChoiceLabel(defaultChoice, presets, 'No persona (default system prompt)')}</Button>
+            )}
+          />
+          <Button mode="outlined" onPress={() => router.push('/settings/personas')} compact>Manage personas</Button>
         </View>
+        {defaultChoice.kind === 'none' && (
+          <>
+            <Text style={[styles.note, { color: c.textSecondary, marginTop: spacing.sm }]}>Default system prompt, used by chats with no persona and no text of their own:</Text>
+            <PaperInput
+              value={promptText}
+              onChangeText={(t) => { setPromptText(t); settings.setDefaultSystemPrompt(t); }}
+              mode="outlined"
+              multiline
+              numberOfLines={4}
+              style={{ backgroundColor: c.surfaceRaised }}
+            />
+          </>
+        )}
         <View style={[styles.switchRow, { backgroundColor: c.surface, borderColor: c.hairline }]}>
           <View style={{ flex: 1 }}>
             <Text style={{ color: c.text, fontFamily: fontFamilies.interMedium, fontSize: 15 }}>Tell the model today's date</Text>
@@ -221,7 +245,7 @@ export default function SettingsScreen() {
         {/* Backup */}
         <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>Backup</Text>
         <Text style={[styles.note, { color: c.textSecondary }]}>
-          All chats (with every version), presets and settings, as one JSON file. Model files aren't included; settings for models you've also imported here are restored onto them.
+          All chats (with every version), personas and settings, as one JSON file. Model files aren't included; settings for models you've also imported here are restored onto them.
         </Text>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Button mode="outlined" icon="export" onPress={handleBackup} disabled={backupBusy || isWeb} compact>Back up</Button>
@@ -245,7 +269,7 @@ export default function SettingsScreen() {
           <Dialog.Content style={{ gap: 8 }}>
             <Text>{restoreCandidate ? summarize(restoreCandidate) : ''}.</Text>
             <Text style={{ color: c.textSecondary }}>
-              Your current chats, presets and settings will be replaced. This can't be undone; back up first if you might want them.
+              Your current chats, personas and settings will be replaced. This can't be undone; back up first if you might want them.
             </Text>
           </Dialog.Content>
           <Dialog.Actions>

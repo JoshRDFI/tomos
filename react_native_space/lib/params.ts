@@ -5,25 +5,35 @@ export type ParamValue = number | boolean | string | unknown[] | { [k: string]: 
 export type ParamSet = Record<string, ParamValue>;
 
 /** Where an effective value came from, lowest priority first. */
-export type ParamSource = 'app' | 'global' | 'file' | 'model' | 'chat';
+export type ParamSource = 'app' | 'global' | 'file' | 'model' | 'persona' | 'chat';
 
 export const SOURCE_LABELS: Record<ParamSource, string> = {
   app: 'App default',
   global: 'All chats',
   file: 'Model file',
   model: 'This model',
+  persona: 'Persona',
   chat: 'This chat',
 };
 
 /** The app's own starting values (the bottom layer). */
+/** Default context length, when the model was trained for at least this much. */
+export const DEFAULT_N_CTX = 8192;
+
 export const APP_DEFAULTS: ParamSet = {
   temperature: 0.7,
   top_p: 0.9,
   top_k: 40,
   min_p: 0.05,
   penalty_repeat: 1.1,
+  // DRY catches a model copying whole sentences from earlier replies, which the
+  // repeat penalty (last 64 tokens only) can't see.
+  dry_multiplier: 0.8,
+  // Presence, frequency and repeat penalty only see this many recent tokens;
+  // llama.cpp's 64 is a few sentences, too short to see the previous reply.
+  penalty_last_n: 512,
   n_predict: 1024,
-  n_ctx: 4096,
+  n_ctx: DEFAULT_N_CTX,
   // Phones mix fast and efficiency cores (Pixel 9 / Tensor G4: 4 fast + 4 slow).
   // More threads than fast cores usually slows generation down.
   n_threads: 4,
@@ -33,7 +43,9 @@ export const APP_DEFAULTS: ParamSet = {
  * Defaults of the first app version. Its saved settings always held all of
  * these, so values equal to them weren't chosen by the user.
  */
-export const LEGACY_DEFAULTS: ParamSet = { ...APP_DEFAULTS, n_threads: 6 };
+export const LEGACY_DEFAULTS: ParamSet = {
+  temperature: 0.7, top_p: 0.9, top_k: 40, min_p: 0.05, penalty_repeat: 1.1, n_predict: 1024, n_ctx: 4096, n_threads: 6,
+};
 
 /** Keys used by the app's first version, mapped to llama.rn names. */
 const LEGACY_KEYS: Record<string, string> = {
@@ -72,6 +84,7 @@ export interface LayeredParams {
   global?: ParamSet;
   file?: ParamSet;
   model?: ParamSet;
+  persona?: ParamSet;
   chat?: ParamSet;
 }
 
@@ -80,7 +93,12 @@ export interface ResolvedParams {
   sources: Record<string, ParamSource>;
 }
 
-const LAYER_ORDER: ParamSource[] = ['app', 'global', 'file', 'model', 'chat'];
+/** App defaults for a model: the default context, capped at what it was trained for. */
+export function appDefaultsFor(trainedContext: number | null | undefined): ParamSet {
+  return trainedContext && trainedContext < DEFAULT_N_CTX ? { ...APP_DEFAULTS, n_ctx: trainedContext } : APP_DEFAULTS;
+}
+
+const LAYER_ORDER: ParamSource[] = ['app', 'global', 'file', 'model', 'persona', 'chat'];
 
 /** Merge layers; later layers win. */
 export function resolveParams(layers: LayeredParams): ResolvedParams {
@@ -98,6 +116,12 @@ export function resolveParams(layers: LayeredParams): ResolvedParams {
 }
 
 /** Split a resolved set into load-time and per-completion parameters. */
+/** Whether thinking is on for a chat: its own setting, else what it inherits, else on. */
+export function thinkingEnabled(chat: ParamSet, inherited: ResolvedParams): boolean {
+  const v = chat.enable_thinking ?? inherited.values.enable_thinking;
+  return v === undefined ? true : !!v;
+}
+
 export function splitParams(set: ParamSet): { load: ParamSet; completion: ParamSet } {
   const load: ParamSet = {};
   const completion: ParamSet = {};

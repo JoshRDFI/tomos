@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView, Keyboard } from 'react-native';
+import * as downloader from '@/lib/downloader';
+import { syncDownloads } from '@/lib/downloads';
 import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Drawer as DrawerLayout } from 'react-native-drawer-layout';
 import { FlashList } from '@shopify/flash-list';
-import { useRouter, useFocusEffect } from 'expo-router';
+import { useRouter, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, typeScale } from '@/constants/theme';
 import { useModelContext } from '@/contexts/ModelContext';
@@ -14,11 +16,17 @@ import * as llama from '@/lib/llama';
 import { prepareModel } from '@/lib/modelMeta';
 import { loadSignature } from '@/lib/params';
 import { splitThinking } from '@/lib/thinking';
-import { withDate } from '@/lib/dateContext';
-import type { SessionRecord, MessageRecord, ModelRecord } from '@/types';
-import MessageBubble from '@/components/chat/MessageBubble';
+import type { SessionRecord, MessageRecord, ModelRecord, Persona, Summary } from '@/types';
+import MessageBubble, { StatusLine } from '@/components/chat/MessageBubble';
+import { compactIfNeeded, prepareContinuation } from '@/lib/compactionRunner';
+import { importPersonaFromFile } from '@/lib/personaImport';
+import { activeSummary, promptPath, summariesOnPath, CONTINUE_HINT_AFTER } from '@/lib/compaction';
+import ContinuedChip from '@/components/chat/ContinuedChip';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
+import { toChatMessages } from '@/lib/prompt';
+import { editedReply } from '@/lib/editReply';
+import { isChatEmpty } from '@/lib/personas';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
 
@@ -28,8 +36,16 @@ export default function ChatScreen() {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  // Dialogs don't move for the keyboard on their own (edge-to-edge Android).
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKeyboardHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const router = useRouter();
+  const { continueFrom } = useLocalSearchParams<{ continueFrom?: string }>();
   const modelCtx = useModelContext();
   const settings = useSettings();
 
@@ -37,6 +53,16 @@ export default function ChatScreen() {
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [messages, setMessages] = useState<MessageRecord[]>([]);
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  // Auto-compaction: summaries of this chat, and the one running now (if any).
+  const [summaries, setSummaries] = useState<Summary[]>([]);
+  const [compacting, setCompacting] = useState(false);
+  const [summaryDialog, setSummaryDialog] = useState<Summary | null>(null);
+  const compactionRef = useRef<Promise<void> | null>(null);
+  // Set to stop the running compaction, even before its request has started.
+  const compactionCancel = useRef<{ stop: boolean }>({ stop: false });
+  const [continueHint, setContinueHint] = useState<string | null>(null);
+  const [carriedDialog, setCarriedDialog] = useState(false);
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
@@ -50,6 +76,8 @@ export default function ChatScreen() {
   const [deleteDialog, setDeleteDialog] = useState<SessionRecord | null>(null);
   const [renameText, setRenameText] = useState('');
   const [longPressMsg, setLongPressMsg] = useState<MessageRecord | null>(null);
+  const [replyEdit, setReplyEdit] = useState<{ msg: MessageRecord; text: string } | null>(null);
+  const replyInputRef = useRef<any>(null);
 
   // refs removed - DrawerLayout and FlashList v2 don't support them in this way
   const isWeb = Platform.OS === 'web';
@@ -103,7 +131,46 @@ export default function ChatScreen() {
     setSessions(s);
     const m = await db.getAllModels();
     setModels(m);
+    setPersonas(await db.getAllPersonas());
   }, [isWeb]);
+
+  // Persona picked on an empty chat: the greeting follows it.
+  const changePersona = useCallback(async (choice: db.PersonaChoice) => {
+    if (!session) return;
+    await db.setSessionPersona(session.id, choice);
+    const fresh = await db.getSession(session.id);
+    if (fresh) setSession(fresh);
+    setMessages(await db.getSessionMessages(session.id));
+  }, [session]);
+
+  // "Import from file…" on a new chat: the imported persona is used right away.
+  const importPersona = useCallback(async () => {
+    const r = await importPersonaFromFile();
+    if (!r) return;
+    if ('error' in r) { setSnack(r.error); return; }
+    setPersonas(await db.getAllPersonas());
+    await changePersona({ kind: 'persona', id: r.persona.id });
+    setSnack(`Imported ${r.persona.name}`);
+  }, [changePersona]);
+
+  // Hugging Face downloads that finished while the app was away become models
+  // here too, not only on the Models screen.
+  useEffect(() => {
+    if (isWeb || !downloader.isSupported()) return;
+    const check = async () => {
+      try {
+        const { finished } = await syncDownloads();
+        if (finished.length === 0) return;
+        refreshSessions();
+        setSnack(finished.length === 1 ? `${finished[0].displayName} downloaded` : `${finished.length} models downloaded`);
+      } catch (e) {
+        console.warn('Download sync failed', e);
+      }
+    };
+    check();
+    const sub = AppState.addEventListener('change', (s) => { if (s === 'active') check(); });
+    return () => sub.remove();
+  }, [isWeb, refreshSessions]);
 
   // On returning to this screen: pick up session edits (chat settings), a
   // session chosen from search, and models added/removed on the Models screen.
@@ -155,9 +222,51 @@ export default function ChatScreen() {
     return () => handler.remove();
   }, [drawerOpen]);
 
+  // A running compaction yields to anything the user does next: stop it
+  // (nothing is saved) and wait for the model to be free.
+  const stopCompaction = useCallback(async () => {
+    const p = compactionRef.current;
+    if (!p) return;
+    compactionCancel.current.stop = true;
+    llama.stopGeneration();
+    await p;
+  }, []);
+
+  const startCompaction = useCallback((sessionId: string, model: ModelRecord) => {
+    if (compactionRef.current) return;
+    const cancel = { stop: false };
+    compactionCancel.current = cancel;
+    compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => setCompacting(true), cancel })
+      .then(async (saved) => {
+        if (!saved) return;
+        const list = await db.getSummaries(sessionId);
+        if (sessionIdRef.current === sessionId) setSummaries(list);
+        // Summaries of summaries lose detail: suggest a fresh chat, once per chat.
+        const onPath = summariesOnPath(list, await db.getSessionMessages(sessionId)).length;
+        const key = `continueHint:${sessionId}`;
+        if (onPath >= CONTINUE_HINT_AFTER && !(await db.getSetting(key))) {
+          await db.setSetting(key, '1');
+          if (sessionIdRef.current === sessionId) setContinueHint(sessionId);
+        }
+      })
+      .catch((e) => console.warn('Compaction error', e))
+      .finally(() => {
+        compactionRef.current = null;
+        setCompacting(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!session) { setSummaries([]); return; }
+    let cancelled = false;
+    db.getSummaries(session.id).then((list) => { if (!cancelled) setSummaries(list); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [session?.id, messages]);
+
   // Switch session
   const switchSession = useCallback(async (id: string) => {
     if (isWeb) return;
+    await stopCompaction();
     const s = await db.getSession(id);
     if (!s) return;
     setSession(s);
@@ -165,19 +274,60 @@ export default function ChatScreen() {
     setMessages(msgs);
     setDrawerOpen(false);
     db.setSetting('lastSessionId', s.id).catch(() => {});
-  }, [isWeb]);
+  }, [isWeb, stopCompaction]);
 
   // New chat
   const newChat = useCallback(async () => {
     if (isWeb) return;
+    await stopCompaction();
     const modelId = modelCtx.loadedModelId ?? (await db.getSetting('lastModelId'));
     const s = await db.createSession(modelId);
     setSession(s);
-    setMessages([]);
+    setMessages(await db.getSessionMessages(s.id));
     setSessions((prev) => [s, ...prev]);
     setDrawerOpen(false);
     db.setSetting('lastSessionId', s.id).catch(() => {});
-  }, [isWeb, modelCtx.loadedModelId]);
+  }, [isWeb, modelCtx.loadedModelId, stopCompaction]);
+
+  // "Continue in a new chat": carry the summary and recent messages over, link back.
+  const continueChat = useCallback(async (fromId: string) => {
+    if (isWeb || generatingRef.current) return;
+    await stopCompaction();
+    const from = await db.getSession(fromId);
+    if (!from) return;
+    generatingRef.current = true;
+    try {
+      const cancel = { stop: false };
+      compactionCancel.current = cancel;
+      const carried = prepareContinuation(fromId, modelCtx.loadedModel, { onStart: () => setCompacting(true), cancel });
+      compactionRef.current = carried.then(() => {}, () => {});
+      let carryOver: string;
+      try {
+        carryOver = await carried;
+      } finally {
+        compactionRef.current = null;
+        setCompacting(false);
+      }
+      const s = await db.createContinuation(from, carryOver);
+      setSession(s);
+      setMessages([]);
+      setEditMode(null);
+      setSessions((prev) => [s, ...prev]);
+      db.setSetting('lastSessionId', s.id).catch(() => {});
+    } catch (e) {
+      setSnack('Couldn\'t continue in a new chat: ' + String((e as any)?.message ?? e));
+    } finally {
+      generatingRef.current = false;
+    }
+  }, [isWeb, stopCompaction, modelCtx.loadedModel]);
+
+  // Chat settings → "Continue in a new chat" navigates here with ?continueFrom=.
+  const handledContinue = useRef<string | null>(null);
+  useEffect(() => {
+    if (!continueFrom || handledContinue.current === continueFrom) return;
+    handledContinue.current = continueFrom;
+    continueChat(continueFrom).finally(() => router.setParams({ continueFrom: undefined }));
+  }, [continueFrom, continueChat, router]);
 
 
   // Generate a reply to `parentId` (a user message) from the conversation
@@ -223,17 +373,13 @@ export default function ChatScreen() {
       KA.activateKeepAwakeAsync('gen').catch(() => {});
     } catch {}
 
+    let saved = false;
     try {
-      let systemPrompt = await db.getEffectiveSystemPrompt(fresh);
-      if ((await db.getSetting('includeDate')) !== '0') systemPrompt = withDate(systemPrompt, new Date());
+      const systemPrompt = await db.buildSystemMessage(fresh, currentMsgs);
       const chatMessages = [
         ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
-        // Thinking isn't sent back to the model, only answers. Replies saved
-        // before thinking was split out still carry their tags; strip them.
-        ...currentMsgs.map((m) => ({
-          role: m.role as 'user' | 'assistant',
-          content: m.role === 'assistant' && !m.reasoning ? splitThinking(m.content ?? '').answer : (m.content ?? ''),
-        })),
+        // Messages a summary covers reach the model as that summary instead.
+        ...toChatMessages(promptPath(currentMsgs, await db.getSummaries(sessionId))),
       ];
 
       const result = await llama.generate(model, chatMessages, completion, setStream, partial);
@@ -254,6 +400,7 @@ export default function ChatScreen() {
           // Thinking time grows only if the thinking itself was continued.
           thinkingMs: partial.content ? (cont.thinkingMs ?? null) : ((cont.thinkingMs ?? 0) + (result.thinkingMs ?? 0)) || null,
         });
+        saved = true;
       } else if (result.content.length > 0 || result.reasoning.length > 0 || !result.stopped) {
         // Save the reply (skipped if stopped before anything was produced)
         const asstMsg: MessageRecord = {
@@ -271,6 +418,7 @@ export default function ChatScreen() {
           parentId,
         };
         await db.insertMessage(asstMsg);
+        saved = true;
       }
       await db.updateSession(sessionId, { updatedAt: Date.now() });
 
@@ -288,7 +436,9 @@ export default function ChatScreen() {
         KA.deactivateKeepAwake('gen');
       } catch {}
     }
-  }, [modelCtx]);
+    // The chat may be getting long: condense older messages in the background.
+    if (saved) startCompaction(sessionId, model);
+  }, [modelCtx, startCompaction]);
 
   // Send message
   const sendMessage = useCallback(async (text: string) => {
@@ -297,6 +447,7 @@ export default function ChatScreen() {
     if (!model) return;
     generatingRef.current = true;
     try {
+      await stopCompaction();
       // An edit becomes a new version of the edited message; the old version
       // and the replies after it stay available through the version switcher.
       let parentId: string | null;
@@ -323,8 +474,7 @@ export default function ChatScreen() {
       await db.insertMessage(userMsg);
 
       // Auto-title on first user message
-      const count = await db.getSessionMessageCount(session.id);
-      if (count <= 1) {
+      if ((await db.countUserMessages(session.id)) === 1) {
         await db.updateSession(session.id, { title: text.slice(0, 40), updatedAt: Date.now() });
       }
 
@@ -333,7 +483,7 @@ export default function ChatScreen() {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions]);
+  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions, stopCompaction]);
 
   // Stop
   const handleStop = useCallback(() => {
@@ -362,12 +512,13 @@ export default function ChatScreen() {
     if (lastMsg?.role !== 'assistant' || !lastMsg.parentId) return;
     generatingRef.current = true;
     try {
+      await stopCompaction();
       await runGeneration(session.id, model, lastMsg.parentId);
     } finally {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
+  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions, stopCompaction]);
 
   // Continue the last reply where it stopped or was cut off.
   const handleContinue = useCallback(async () => {
@@ -378,12 +529,13 @@ export default function ChatScreen() {
     if (lastMsg?.role !== 'assistant' || !lastMsg.parentId || !lastMsg.stopped) return;
     generatingRef.current = true;
     try {
+      await stopCompaction();
       await runGeneration(session.id, model, lastMsg.parentId, lastMsg);
     } finally {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions]);
+  }, [session, messages, modelCtx.loadedModel, runGeneration, refreshSessions, stopCompaction]);
 
   // Show another version of a message (and the conversation that followed it).
   const handleSwitchVersion = useCallback(async (msg: MessageRecord, delta: number) => {
@@ -404,11 +556,12 @@ export default function ChatScreen() {
       setSnack('Stop generating before switching models');
       return;
     }
+    await stopCompaction();
     await db.updateSession(session.id, { modelId: model.id, updatedAt: Date.now() });
     setSession((s) => s ? { ...s, modelId: model.id } : s);
     const prepared = await prepareModel(model, await db.getSession(session.id));
     await modelCtx.loadModel(prepared.model, prepared.load);
-  }, [session, modelCtx]);
+  }, [session, modelCtx, stopCompaction]);
 
   // Rename
   const handleRename = useCallback(async () => {
@@ -470,10 +623,23 @@ export default function ChatScreen() {
     setLongPressMsg(null);
   }, [longPressMsg]);
 
+  // Edit a reply: saved as a new version, so the model sees the edited text
+  // from here on and the original stays one tap away.
+  const saveReplyEdit = useCallback(async () => {
+    if (!session || !replyEdit || generatingRef.current) return;
+    const text = replyEdit.text.trim();
+    if (!text) return;
+    await stopCompaction();
+    await db.insertMessage(editedReply(replyEdit.msg, text, db.generateId(), Date.now()));
+    setReplyEdit(null);
+    setMessages(await db.getSessionMessages(session.id));
+  }, [session, replyEdit, stopCompaction]);
+
   // Render
   const drawerWidth = Math.min(screenWidth * 0.84, 360);
   const modelReady = modelCtx.status === 'ready';
-  const hasMessages = (messages?.length ?? 0) > 0;
+  const hasMessages = !isChatEmpty(messages ?? []);
+  const greetingMsg = !hasMessages ? ((messages ?? []).find((m) => m.kind === 'greeting') ?? null) : null;
 
   // Chronological order (oldest first); the list starts rendering from the
   // bottom. While streaming, a placeholder reply is appended at the end.
@@ -497,10 +663,12 @@ export default function ChatScreen() {
   }, [messages, isStreaming, session?.id, modelCtx.loadedModel?.displayName]);
   const displayCount = displayMessages.length;
 
+  const condensed = React.useMemo(() => activeSummary(summaries, messages ?? []), [summaries, messages]);
+
   const renderMessage = useCallback(({ item, index }: { item: MessageRecord; index: number }) => {
     const streaming = isStreaming && item.id === '__streaming__';
     const isLastAssistant = item.role === 'assistant' && index === displayCount - 1 && !isStreaming;
-    return (
+    const bubble = (
       <MessageBubble
         message={item}
         isLast={isLastAssistant}
@@ -513,7 +681,19 @@ export default function ChatScreen() {
         onSwitchVersion={!isStreaming && item.versions ? (delta) => handleSwitchVersion(item, delta) : undefined}
       />
     );
-  }, [isStreaming, stream, handleCopy, handleRegenerate, handleContinue, handleSwitchVersion, displayCount]);
+    if (item.id !== condensed?.throughMessageId) return bubble;
+    // Everything up to here reaches the model as the summary.
+    return (
+      <View>
+        {bubble}
+        <Pressable onPress={() => setSummaryDialog(condensed)} accessibilityRole="button" style={styles.condensed}>
+          <View style={[styles.condensedLine, { backgroundColor: c.hairline }]} />
+          <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12 }}>Earlier messages condensed · View summary</Text>
+          <View style={[styles.condensedLine, { backgroundColor: c.hairline }]} />
+        </Pressable>
+      </View>
+    );
+  }, [isStreaming, stream, handleCopy, handleRegenerate, handleContinue, handleSwitchVersion, displayCount, condensed, c]);
 
   const chatTopBar = (
     <View style={[styles.topBar, { backgroundColor: c.surface, borderBottomColor: c.hairline, paddingTop: insets.top, height: 56 + insets.top, zIndex: 1 }]}>
@@ -574,6 +754,13 @@ export default function ChatScreen() {
       <View style={[styles.container, { backgroundColor: c.background }]}>
         {chatTopBar}
         {statusBanner}
+        {!!session?.continuedFromId && (
+          <ContinuedChip
+            fromTitle={sessions.find((x) => x.id === session.continuedFromId)?.title ?? null}
+            onOpen={() => switchSession(session.continuedFromId!)}
+            onShowCarried={() => setCarriedDialog(true)}
+          />
+        )}
         {isWeb && <WebNotice />}
         {!hasMessages && !isStreaming ? (
           <EmptyChat
@@ -582,6 +769,12 @@ export default function ChatScreen() {
             hasModelInLib={(models?.length ?? 0) > 0}
             onSuggestion={(s) => setDraft({ text: s, key: Date.now() })}
             onOpenModelMenu={() => setModelMenuOpen(true)}
+            greeting={greetingMsg}
+            persona={db.personaChoiceOf(session)}
+            personas={personas}
+            onPersonaChange={changePersona}
+            onPersonaImport={importPersona}
+            onCopy={handleCopy}
           />
         ) : (
           // Clip the list so a tall message can never extend over (and take
@@ -596,6 +789,12 @@ export default function ChatScreen() {
               }}
               renderItem={renderMessage}
               keyExtractor={(item) => item.id}
+              extraData={condensed?.id}
+              ListFooterComponent={compacting ? (
+                <View style={{ paddingHorizontal: spacing.md }}>
+                  <StatusLine text="Condensing earlier messages…" onStop={stopCompaction} />
+                </View>
+              ) : null}
               contentContainerStyle={{ paddingVertical: spacing.xs }}
             />
           </View>
@@ -640,6 +839,36 @@ export default function ChatScreen() {
 
       <Portal>
         {/* Rename Dialog */}
+        <Dialog visible={!!summaryDialog} onDismiss={() => setSummaryDialog(null)}>
+          <Dialog.Title>Summary of earlier messages</Dialog.Title>
+          <Dialog.ScrollArea style={{ maxHeight: 420 }}>
+            <ScrollView contentContainerStyle={{ paddingVertical: 12 }}>
+              <Text selectable style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14, lineHeight: 20 }}>{summaryDialog?.content}</Text>
+              <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12, marginTop: 12 }}>
+                {summaryDialog ? `Written ${new Date(summaryDialog.createdAt).toLocaleString()}${summaryDialog.modelName ? ` by ${summaryDialog.modelName}` : ''}. The model sees this instead of the messages above the divider; they stay saved here.` : ''}
+              </Text>
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setSummaryDialog(null)}>Close</Button>
+          </Dialog.Actions>
+        </Dialog>
+
+        <Dialog visible={carriedDialog} onDismiss={() => setCarriedDialog(false)}>
+          <Dialog.Title>Carried over</Dialog.Title>
+          <Dialog.ScrollArea style={{ maxHeight: 420 }}>
+            <ScrollView contentContainerStyle={{ paddingVertical: 12 }}>
+              <Text selectable style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 14, lineHeight: 20 }}>{session?.carryOver || 'Nothing was carried over.'}</Text>
+              <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12, marginTop: 12 }}>
+                The model reads this at the start of this chat, until the chat writes its own summary.
+              </Text>
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setCarriedDialog(false)}>Close</Button>
+          </Dialog.Actions>
+        </Dialog>
+
         <Dialog visible={!!renameDialog} onDismiss={() => setRenameDialog(null)}>
           <Dialog.Title>Rename chat</Dialog.Title>
           <Dialog.Content>
@@ -661,12 +890,39 @@ export default function ChatScreen() {
           </Dialog.Actions>
         </Dialog>
 
+        {/* Sits above the keyboard; the box scrolls itself to keep the cursor in view. Opens with the cursor at the end. */}
+        <Dialog visible={!!replyEdit} onDismiss={() => setReplyEdit(null)} style={{ marginBottom: keyboardHeight }}>
+          <Dialog.Title>Edit reply</Dialog.Title>
+          <Dialog.Content>
+            <PaperInput
+              ref={replyInputRef}
+              value={replyEdit?.text ?? ''}
+              onChangeText={(t) => setReplyEdit((r) => (r ? { ...r, text: t } : r))}
+              mode="outlined"
+              multiline
+              autoFocus
+              onFocus={() => { const n = replyEdit?.text.length ?? 0; setTimeout(() => replyInputRef.current?.setSelection(n, n), 50); }}
+              style={{ backgroundColor: c.surfaceRaised, height: Math.max(120, Math.min(480, screenHeight - keyboardHeight - insets.top - 230)) }}
+            />
+            <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12, marginTop: 6 }}>
+              Saved as a new version; the original stays under ‹ ›.
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setReplyEdit(null)}>Cancel</Button>
+            <Button onPress={saveReplyEdit} disabled={!replyEdit?.text.trim()}>Save</Button>
+          </Dialog.Actions>
+        </Dialog>
+
         {/* Long press menu */}
         <Dialog visible={!!longPressMsg} onDismiss={() => setLongPressMsg(null)}>
           <Dialog.Content style={{ gap: 4 }}>
             <Button icon="content-copy" onPress={() => { handleCopy(longPressMsg?.role === 'assistant' && !longPressMsg.reasoning ? splitThinking(longPressMsg.content ?? '').answer : (longPressMsg?.content ?? '')); setLongPressMsg(null); }}>Copy</Button>
             {longPressMsg?.role === 'user' && (
               <Button icon="pencil" onPress={handleEditResend}>Edit & resend</Button>
+            )}
+            {longPressMsg?.role === 'assistant' && !isStreaming && (
+              <Button icon="pencil" onPress={() => { const m = longPressMsg; setLongPressMsg(null); setReplyEdit({ msg: m, text: m.reasoning ? (m.content ?? '') : splitThinking(m.content ?? '').answer }); }}>Edit reply</Button>
             )}
             {longPressMsg?.role === 'assistant' && longPressMsg?.id === messages?.[messages.length - 1]?.id && (
               <Button icon="refresh" onPress={() => { setLongPressMsg(null); handleRegenerate(); }}>Regenerate</Button>
@@ -679,11 +935,23 @@ export default function ChatScreen() {
       </Portal>
 
       <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={2000}>{snack}</Snackbar>
+      <Snackbar
+        visible={!!continueHint && continueHint === session?.id}
+        onDismiss={() => setContinueHint(null)}
+        onIconPress={() => setContinueHint(null)}
+        // Stays until answered: it shows once per chat.
+        duration={Number.POSITIVE_INFINITY}
+        action={{ label: 'Continue', onPress: () => { const id = continueHint; setContinueHint(null); if (id) continueChat(id); } }}
+      >
+        This chat has been condensed several times. Continue in a new chat?
+      </Snackbar>
     </>
   );
 }
 
 const styles = StyleSheet.create({
+  condensed: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: spacing.md, paddingVertical: 10 },
+  condensedLine: { flex: 1, height: StyleSheet.hairlineWidth },
   container: { flex: 1 },
   topBar: { flexDirection: 'row', alignItems: 'center', height: 56, borderBottomWidth: StyleSheet.hairlineWidth },
   modelInfo: { flex: 1 },

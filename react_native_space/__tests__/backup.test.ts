@@ -31,7 +31,7 @@ describe('parseBackup', () => {
 
   it.each([
     ['not json', '{', 'not valid JSON'],
-    ['another file', JSON.stringify({ hello: 1 }), "isn't an LLM Chat backup"],
+    ['another file', JSON.stringify({ hello: 1 }), "isn't a backup from this app"],
     ['newer version', JSON.stringify({ ...valid(), version: 99 }), 'newer version'],
     ['missing table', JSON.stringify({ ...valid(), messages: undefined }), 'damaged (messages)'],
     ['orphan message', JSON.stringify({ ...valid(), messages: [{ id: 'y', sessionId: 'nope' }] }), 'without a chat'],
@@ -66,5 +66,31 @@ describe('restore helpers', () => {
 
   it('names the file by date', () => {
     expect(backupFileName(new Date(2026, 0, 5))).toBe('llmchat-backup-2026-01-05.json');
+  });
+});
+
+describe('backup versions', () => {
+  it('accepts a version-1 backup', () => {
+    expect(parseBackup(JSON.stringify({ ...valid(), version: 1 })).version).toBe(1);
+  });
+  it('accepts version 2', () => {
+    expect(parseBackup(JSON.stringify({ ...valid(), version: 2 })).version).toBe(2);
+  });
+  it('rejects version 3 as newer', () => {
+    expect(() => parseBackup(JSON.stringify({ ...valid(), version: 3 }))).toThrow('newer version');
+  });
+});
+
+describe('summaries in backups', () => {
+  const v2 = () => ({ ...valid(), version: 2 });
+  it('accepts a v2 backup with summaries', () => {
+    const b = parseBackup(JSON.stringify({ ...v2(), summaries: [{ id: 'u', sessionId: 's1', throughMessageId: 'x', content: 'S', createdAt: 1 }] }));
+    expect(b.summaries).toHaveLength(1);
+  });
+  it('accepts a v2 backup without summaries', () => {
+    expect(parseBackup(JSON.stringify(v2())).summaries).toBeUndefined();
+  });
+  it("rejects summaries that aren't a list", () => {
+    expect(() => parseBackup(JSON.stringify({ ...v2(), summaries: { a: 1 } }))).toThrow('damaged (summaries)');
   });
 });

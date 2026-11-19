@@ -54,6 +54,18 @@ describe('fetchRepo', () => {
     expect((fetch.mock.calls[0] as any[])[0]).toBe('https://huggingface.co/api/models/u/r?blobs=true');
   });
 
+  it('lists files at the revision a link names', async () => {
+    const fetch = jest.fn(() => json(200, { id: 'u/r', sha: 's2', gated: false, siblings: [] }));
+    (global as any).fetch = fetch;
+    await fetchRepo('u/r', 'v1.0/x');
+    expect((fetch.mock.calls[0] as any[])[0]).toBe('https://huggingface.co/api/models/u/r/revision/v1.0%2Fx?blobs=true');
+  });
+
+  it('treats 403 as needing a login', async () => {
+    (global as any).fetch = jest.fn(() => json(403, {}));
+    await expect(fetchRepo('m/l')).rejects.toMatchObject({ kind: 'gated' });
+  });
+
   it('treats 401 as not found (anonymous API hides private repos)', async () => {
     (global as any).fetch = jest.fn(() => json(401, {}));
     await expect(fetchRepo('nobody/nothing')).rejects.toMatchObject({ kind: 'not_found' });
