@@ -1,4 +1,5 @@
 import {
+  thinkingEnabled,
   APP_DEFAULTS, extractFileParams, loadSignature, parseCliFlags, parseParamSet,
   parseValue, resolveParams, splitParams,
 } from '@/lib/params';
@@ -129,4 +130,11 @@ describe('persona layer', () => {
     const c = resolveParams({ persona: { temperature: 0.9 }, chat: { temperature: 0.2 } });
     expect(c.values.temperature).toBe(0.2);
   });
+});
+
+describe('thinkingEnabled (the chat-settings Thinking switch)', () => {
+  const inherited = (v?: boolean) => resolveParams(v === undefined ? {} : { global: { enable_thinking: v } });
+  it('on by default', () => expect(thinkingEnabled({}, inherited())).toBe(true));
+  it('follows the inherited setting', () => expect(thinkingEnabled({}, inherited(false))).toBe(false));
+  it("the chat's own setting wins", () => expect(thinkingEnabled({ enable_thinking: true }, inherited(false))).toBe(true));
 });

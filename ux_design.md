@@ -250,7 +250,7 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
   - Large model name (display style, wraps to two lines max) with its quant/size chip.
   - Below it, 4 suggestion chips that fill the composer (never send) when tapped, focused with the cursor at the end so the user finishes the sentence: "Explain a concept simply" → "Explain simply: ", "Summarize this text…" → "Summarize this text:" + newline, "Write a Python function that…", "Brainstorm ideas for…".
   - These sit in the lower half, above the composer.
-  - Above the suggestions: the persona's greeting (if any) in an assistant bubble, then a chip "Persona: <name> ▾" (shown when personas exist) opening the persona menu without "Custom". A chat counts as empty until the user sends something; auto-titling uses the first user message.
+  - Above the suggestions: the persona's greeting (if any) in an assistant bubble, then a chip "Persona: <name> ▾" (always shown) opening the persona menu without "Custom". "Import from file…" there imports a persona and uses it for this chat. A chat counts as empty until the user sends something; auto-titling uses the first user message.
 - **Session has no model and the library is not empty:** inline row "Choose a model for this chat" with a button that opens the model-switch menu.
 
 **Drawer (left, react-native-drawer-layout, width 84% max 360dp, surface colour)**
@@ -288,9 +288,10 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
 Stack header: "Chat settings" with a back arrow.
 
 **Instructions section**
-- Row "Persona" with a menu: "No persona (default system prompt)", each persona, "Custom". Order of precedence: custom text > persona > default system prompt.
+- Row "Persona" with a menu: "No persona (default system prompt)", each persona, "Custom", then a divider, "Import from file…" (imports a persona and switches the chat to it) and "Manage personas…". Order of precedence: custom text > persona > default system prompt.
 - Custom shows a multiline TextInput (the chat's `systemPromptOverride`) and "Save as persona" (name dialog; creates a persona from the text and switches the chat to it; a duplicate name shows an inline error).
 - Changing the persona while the chat has no user messages swaps the greeting.
+- Row "Thinking" with a Switch and caption "For models that think before answering (Qwen3, DeepSeek-R1…). Off gives faster, shorter replies." It sets this chat's `enable_thinking` (the same value as the Thinking row in the settings below); its position shows the chat's value, else the inherited one, else on.
 
 **Model settings section**
 - A `ParamEditor` (see *Settings editor* below) for this chat's layer. Inherited values come from app defaults → all chats → the model file → the model (the session's model, or `lastModelId`) → the chat's persona.
@@ -369,7 +370,7 @@ Stack header: "Download from Hugging Face". Android only.
 Reached from the drawer's "Settings" row. One scrolling page:
 - **Appearance:** SegmentedButtons Dark / Light / System (default Dark). Applies instantly.
 - **New chats use:** "Applies to chats you start from now on; each chat can change it in its own settings."
-  - Persona menu ("No persona (default system prompt)" or a persona; setting `defaultPersonaId`) and "Manage personas" → push Personas.
+  - Persona menu ("No persona (default system prompt)" or a persona; setting `defaultPersonaId`; "Import from file…" imports one and makes it the default; "Manage personas…") and "Manage personas" → push Personas.
   - With no persona chosen, the default system prompt's multiline TextInput (used by chats with no persona and no text of their own).
   - Switch row "Tell the model today's date" (default on), caption showing the sentence added: "Today is Sunday, November 15, 2026." (`lib/dateContext.ts`, local time, appended to the effective system prompt of every chat at send time; setting key `includeDate`).
 - **Model settings for all chats:** a `ParamEditor` for the global layer (inherits only app defaults). Debounced save, flushed on leave.
@@ -400,7 +401,7 @@ Shared by Settings, Model settings and Chat settings. Props: the overrides at th
 - **Open-source licenses:** searchable FlashList from `constants/licenses.json`, in sections "On-device inference (native code)", "Fonts", "Adapted source code", "JavaScript packages". Tap an entry to expand its project link and full license text (selectable, mono). Packages without a license file show their license name and link.
 
 ### 6. Personas (app/settings/personas.tsx, app/settings/persona.tsx)
-- List: name plus a 2-line preview of the instructions; FAB "New persona"; header "Import" (any file → `parsePersonaMarkdown` → a new persona, name made unique, then its editor opens).
+- List: name plus a 2-line preview of the instructions; FAB "New persona"; header "Import" (any file → `lib/personaImport.ts` → `parsePersonaMarkdown` → a new persona, name made unique, then its editor opens).
 - Starter cards for starters not yet added: "Concise assistant", "Code reviewer", "Writing editor", and "Friendly explainer" (with a greeting and two examples).
 - **Editor** (header Save; leaving with unsaved changes asks Save/Discard):
   - Name (required, unique), Instructions (required), Greeting (optional), Example exchanges (User/Reply pairs, add/remove).

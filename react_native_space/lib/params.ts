@@ -100,6 +100,12 @@ export function resolveParams(layers: LayeredParams): ResolvedParams {
 }
 
 /** Split a resolved set into load-time and per-completion parameters. */
+/** Whether thinking is on for a chat: its own setting, else what it inherits, else on. */
+export function thinkingEnabled(chat: ParamSet, inherited: ResolvedParams): boolean {
+  const v = chat.enable_thinking ?? inherited.values.enable_thinking;
+  return v === undefined ? true : !!v;
+}
+
 export function splitParams(set: ParamSet): { load: ParamSet; completion: ParamSet } {
   const load: ParamSet = {};
   const completion: ParamSet = {};

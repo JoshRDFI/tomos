@@ -7,7 +7,8 @@ import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, radii } from '@/constants/theme';
 import type { Persona } from '@/types';
 import { uniqueName } from '@/lib/personas';
-import { parsePersonaMarkdown, type PersonaDraft } from '@/lib/personaMarkdown';
+import type { PersonaDraft } from '@/lib/personaMarkdown';
+import { importPersonaFromFile } from '@/lib/personaImport';
 
 const STARTERS: PersonaDraft[] = [
   { name: 'Concise assistant', content: 'You are a helpful, concise assistant. Answer briefly and directly.', greeting: null, examples: [], params: {} },
@@ -56,25 +57,10 @@ export default function PersonasScreen() {
   };
 
   const importFile = async () => {
-    try {
-      const DocPicker = await import('expo-document-picker');
-      const result = await DocPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: false });
-      if (result.canceled || !result.assets?.[0]) return;
-      const asset = result.assets[0];
-      const { copyAsync } = await import('expo-file-system/legacy');
-      const { Paths, File } = await import('expo-file-system');
-      const tmp = new File(Paths.cache, 'persona-import.md');
-      if (tmp.exists) tmp.delete();
-      await copyAsync({ from: asset.uri, to: tmp.uri });
-      const text = await tmp.text();
-      tmp.delete();
-      const draft = parsePersonaMarkdown(text, asset.name ?? 'Imported persona');
-      if (!draft.content.trim()) { setSnack('That file has no instructions in it.'); return; }
-      const id = await add(draft);
-      router.push({ pathname: '/settings/persona', params: { id } });
-    } catch (e) {
-      setSnack('Couldn\'t read that file: ' + String((e as any)?.message ?? e));
-    }
+    const r = await importPersonaFromFile();
+    if (!r) return;
+    if ('error' in r) { setSnack(r.error); return; }
+    router.push({ pathname: '/settings/persona', params: { id: r.persona.id } });
   };
 
   const missingStarters = STARTERS.filter((s) => !personas.some((p) => p.name === s.name));

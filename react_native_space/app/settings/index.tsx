@@ -3,6 +3,7 @@ import { View, StyleSheet, ScrollView, Platform, Pressable } from 'react-native'
 import { Text, SegmentedButtons, useTheme, Button, Menu, TextInput as PaperInput, Icon, Switch, Dialog, Portal, Snackbar } from 'react-native-paper';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import PersonaPicker, { personaChoiceLabel } from '@/components/chat/PersonaPicker';
+import { importPersonaFromFile } from '@/lib/personaImport';
 import type { AppTheme } from '@/constants/theme';
 import { spacing, fontFamilies, radii } from '@/constants/theme';
 import { useSettings } from '@/contexts/SettingsContext';
@@ -164,6 +165,16 @@ export default function SettingsScreen() {
               const v = choice.kind === 'persona' ? choice.id : null;
               setDefaultPersonaId(v);
               db.setSetting('defaultPersonaId', v ?? '').catch(() => {});
+            }}
+            onImport={async () => {
+              // The imported persona becomes the one new chats use.
+              const r = await importPersonaFromFile();
+              if (!r) return;
+              if ('error' in r) { setSnack(r.error); return; }
+              setPresets(await db.getAllPersonas());
+              setDefaultPersonaId(r.persona.id);
+              await db.setSetting('defaultPersonaId', r.persona.id);
+              setSnack(`Imported ${r.persona.name}; new chats use it`);
             }}
             anchor={(open) => (
               <Button mode="outlined" onPress={open} icon="account-voice" compact>{personaChoiceLabel(defaultChoice, presets, 'No persona (default system prompt)')}</Button>

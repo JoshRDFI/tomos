@@ -28,10 +28,11 @@ interface Props {
   persona: PersonaChoice;
   personas: Persona[];
   onPersonaChange: (c: PersonaChoice) => void;
+  onPersonaImport: () => void;
   onCopy: (text: string) => void;
 }
 
-export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSuggestion, onOpenModelMenu, greeting, persona, personas, onPersonaChange, onCopy }: Props) {
+export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSuggestion, onOpenModelMenu, greeting, persona, personas, onPersonaChange, onPersonaImport, onCopy }: Props) {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const router = useRouter();
@@ -89,12 +90,13 @@ export default function EmptyChat({ hasModels, loadedModel, hasModelInLib, onSug
             <Markdown content={greeting.content} onCopy={onCopy} />
           </View>
         )}
-        {(personas.length > 0 || persona.kind !== 'none') && (
+        {(
           <PersonaPicker
             value={persona}
             personas={personas}
             allowCustom={false}
             onChange={onPersonaChange}
+            onImport={onPersonaImport}
             anchor={(open) => (
               <Pressable onPress={open} accessibilityRole="button" style={[styles.personaChip, { borderColor: c.hairline }]}>
                 <Icon source="account-voice" size={16} color={c.textSecondary} />

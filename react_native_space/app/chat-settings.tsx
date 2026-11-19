@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { View, StyleSheet, Platform, ScrollView } from 'react-native';
-import { Text, useTheme, Button, TextInput as PaperInput, Dialog, Portal, Snackbar } from 'react-native-paper';
+import { Text, useTheme, Button, TextInput as PaperInput, Dialog, Portal, Snackbar, Switch } from 'react-native-paper';
 import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import type { AppTheme } from '@/constants/theme';
 import { blankPersona, completionParamsOnly } from '@/lib/personas';
@@ -10,8 +10,9 @@ import { useSettings } from '@/contexts/SettingsContext';
 import * as db from '@/lib/db';
 import type { SessionRecord, Persona } from '@/types';
 import ParamEditor from '@/components/params/ParamEditor';
+import { importPersonaFromFile } from '@/lib/personaImport';
 import { ensureFileParams } from '@/lib/modelMeta';
-import { parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from '@/lib/params';
+import { parseParamSet, resolveParams, serializeParamSet, thinkingEnabled, type ParamSet, type ResolvedParams } from '@/lib/params';
 
 export default function ChatSettingsScreen() {
   const theme = useTheme<AppTheme>();
@@ -126,6 +127,20 @@ export default function ChatSettingsScreen() {
     setSnack(`Saved as persona "${n}"`);
   };
 
+  // "Import from file…": this chat uses the imported persona.
+  const importPersona = async () => {
+    const r = await importPersonaFromFile();
+    if (!r) return;
+    if ('error' in r) { setSnack(r.error); return; }
+    const list = await db.getAllPersonas();
+    setPresets(list);
+    flush();
+    const next: db.PersonaChoice = { kind: 'persona', id: r.persona.id };
+    applyChoice(next, list);
+    if (sessionId) await db.setSessionPersona(sessionId, next);
+    setSnack(`Imported ${r.persona.name}`);
+  };
+
   return (
     <>
       <Stack.Screen options={{ title: 'Chat settings', headerStyle: { backgroundColor: c.surface }, headerTintColor: c.text }} />
@@ -139,6 +154,7 @@ export default function ChatSettingsScreen() {
             personas={presets}
             allowCustom
             onChange={changeChoice}
+            onImport={importPersona}
             anchor={(open) => (
               <Button mode="outlined" onPress={open} icon="account-voice" compact>{personaChoiceLabel(choice, presets, 'No persona')}</Button>
             )}
@@ -160,6 +176,21 @@ export default function ChatSettingsScreen() {
             <Button mode="outlined" onPress={() => setSaveDialog(true)} compact style={{ alignSelf: 'flex-start' }}>Save as persona</Button>
           </>
         )}
+
+        {/* Same per-chat setting as the Thinking row under "Settings for this chat". */}
+        <View style={styles.switchRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: c.text, fontFamily: fontFamilies.inter, fontSize: 15 }}>Thinking</Text>
+            <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>
+              For models that think before answering (Qwen3, DeepSeek-R1…). Off gives faster, shorter replies.
+            </Text>
+          </View>
+          <Switch
+            value={thinkingEnabled(overrides, inherited)}
+            onValueChange={(on) => updateOverrides({ ...overrides, enable_thinking: on })}
+            accessibilityLabel="Thinking"
+          />
+        </View>
 
         <Button
           mode="outlined"

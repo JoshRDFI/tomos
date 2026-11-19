@@ -19,6 +19,7 @@ import { splitThinking } from '@/lib/thinking';
 import type { SessionRecord, MessageRecord, ModelRecord, Persona, Summary } from '@/types';
 import MessageBubble, { StatusLine } from '@/components/chat/MessageBubble';
 import { compactIfNeeded, prepareContinuation } from '@/lib/compactionRunner';
+import { importPersonaFromFile } from '@/lib/personaImport';
 import { activeSummary, promptPath, summariesOnPath, CONTINUE_HINT_AFTER } from '@/lib/compaction';
 import ContinuedChip from '@/components/chat/ContinuedChip';
 import ChatInput from '@/components/chat/ChatInput';
@@ -131,6 +132,16 @@ export default function ChatScreen() {
     if (fresh) setSession(fresh);
     setMessages(await db.getSessionMessages(session.id));
   }, [session]);
+
+  // "Import from file…" on a new chat: the imported persona is used right away.
+  const importPersona = useCallback(async () => {
+    const r = await importPersonaFromFile();
+    if (!r) return;
+    if ('error' in r) { setSnack(r.error); return; }
+    setPersonas(await db.getAllPersonas());
+    await changePersona({ kind: 'persona', id: r.persona.id });
+    setSnack(`Imported ${r.persona.name}`);
+  }, [changePersona]);
 
   // Hugging Face downloads that finished while the app was away become models
   // here too, not only on the Models screen.
@@ -740,6 +751,7 @@ export default function ChatScreen() {
             persona={db.personaChoiceOf(session)}
             personas={personas}
             onPersonaChange={changePersona}
+            onPersonaImport={importPersona}
             onCopy={handleCopy}
           />
         ) : (
