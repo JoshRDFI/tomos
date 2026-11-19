@@ -66,11 +66,13 @@ react_native_space/
     hfLink.ts             parseHfLink(): pasted text → repo / revision / file
     hfApi.ts              Hub API: repo files, GGUF versions of a base model, ggufRows(), range reads
     downloader.ts         the only entry point to the download backend (modules/hf-download)
+    backgroundWork.ts     foreground service on while generating; "Reply ready" text (modules/generation-service)
     downloads.ts          start / retry / cancel, reconcile with DownloadManager, finish as models
     thinking.ts           splitThinking(): separate <think> blocks from the answer
     markdown.ts           toMdAst(): markdown + GFM → mdast (ported from DeepSeek's demo, MIT)
     highlight.ts          Prism languages/aliases; highlightCode() → flat styled runs
   modules/hf-download/    local Expo module (Kotlin): Android DownloadManager enqueue/query/remove
+  modules/generation-service/  local Expo module (Kotlin): foreground service + notifications while generating
   constants/theme.ts      tokens, type scale, spacing, radii (no inline hex elsewhere)
   constants/licenses.json generated; see "Licenses"
   constants/app.ts        app name (read from app.json), publisher, code license, repo URL
@@ -203,3 +205,12 @@ The app's own code is Apache-2.0 (root `LICENSE`, `NOTICE`), copyright RDF Indus
 - Code ported from DeepSeek's MIT chat demo keeps its MIT notice.
 - **Markdown** packages (`mdast-*`, `micromark*`, …) are ESM-only. Jest transforms them through `transformIgnorePatterns` in `package.json`; add any new ESM dependency there too.
 - New Prism languages are static imports in `lib/highlight.ts`, after any language they extend.
+
+## Background generation
+
+Android freezes a backgrounded app unless it runs a foreground service, so `modules/generation-service` runs one (type `specialUse`, with the `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` justification in its manifest) while a reply or summary generates. The service does no work itself: llama.rn keeps running in the app's threads because the process is no longer frozen. It holds a partial wake lock (1 h safety timeout), shows an ongoing low-importance notification ("Generating reply…" / "Condensing earlier messages…") with **Stop**, and stops with the task (`stopWithTask`).
+
+`lib/backgroundWork.ts` counts running work: `begin('reply' | 'summary')` starts or updates the service, and the service stops 5 s after the last `end()`. The delay matters: Android 12+ refuses to start a foreground service from the background, so a summary that starts right after a reply must find it still running. `runGeneration` wraps the whole reply (model reload included); `startCompaction` begins in `onStart`, so only an actual summary shows. Native failures are logged and never thrown.
+
+When a reply is saved (not stopped by the user) or fails while `AppState` isn't active, `notifyDone` posts "Reply ready" (first line of the answer, `replyReadyNotice`) on the `replies` channel; tapping it opens `llmchat:///?openSession=<id>`, which the chat screen turns into `switchSession`. The Stop button sends `onStopRequest`, handled like Stop in the app. Android 13+ notification permission is asked once, on the first send (`notificationsAsked` setting); without it, generation still continues, only the notifications are hidden.
+

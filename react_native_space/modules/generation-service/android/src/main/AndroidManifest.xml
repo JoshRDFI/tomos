@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+  <uses-permission android:name="android.permission.WAKE_LOCK" />
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+  <application>
+    <!-- Runs only while a reply or summary the user started is generating. -->
+    <service
+      android:name="com.rdfindustries.generationservice.GenerationService"
+      android:exported="false"
+      android:stopWithTask="true"
+      android:foregroundServiceType="specialUse">
+      <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="On-device language model generation that the user started; runs until the reply is finished or the user taps Stop." />
+    </service>
+  </application>
+</manifest>

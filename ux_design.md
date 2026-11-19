@@ -550,7 +550,7 @@ In order (tracked in Archon):
 8. ~~Download models in the app from Hugging Face, straight into app storage~~ (done, `feature/hf-download`)
 9. (planned) Save and restore each chat's KV cache so long chats reopen without re-reading the history
 10. (planned) Search: scroll to and highlight the matched message
-11. (planned) Keep generating in the background (foreground service with a notification)
+11. ~~Keep generating in the background (foreground service with a notification)~~ (done): "Generating reply…" with Stop while generating; "Reply ready" with the first line when it finishes while you're away, opening the chat
 12. (planned) Attach text and PDF files to a message
 13. (planned) Image input for vision models (mmproj)
 14. (planned) Voice input and read-aloud

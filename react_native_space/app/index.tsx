@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView, Keyboard } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView, Keyboard, PermissionsAndroid } from 'react-native';
 import * as downloader from '@/lib/downloader';
 import { syncDownloads } from '@/lib/downloads';
 import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
@@ -26,6 +26,7 @@ import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
 import { toChatMessages } from '@/lib/prompt';
 import { editedReply } from '@/lib/editReply';
+import { backgroundWork, onStopRequest, replyReadyNotice } from '@/lib/backgroundWork';
 import { isChatEmpty } from '@/lib/personas';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
@@ -45,7 +46,7 @@ export default function ChatScreen() {
     return () => { show.remove(); hide.remove(); };
   }, []);
   const router = useRouter();
-  const { continueFrom } = useLocalSearchParams<{ continueFrom?: string }>();
+  const { continueFrom, openSession } = useLocalSearchParams<{ continueFrom?: string; openSession?: string }>();
   const modelCtx = useModelContext();
   const settings = useSettings();
 
@@ -236,7 +237,8 @@ export default function ChatScreen() {
     if (compactionRef.current) return;
     const cancel = { stop: false };
     compactionCancel.current = cancel;
-    compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => setCompacting(true), cancel })
+    let endSummaryWork: (() => void) | null = null;
+    compactionRef.current = compactIfNeeded(sessionId, model, { onStart: () => { setCompacting(true); endSummaryWork = backgroundWork.begin('summary'); }, cancel })
       .then(async (saved) => {
         if (!saved) return;
         const list = await db.getSummaries(sessionId);
@@ -251,6 +253,7 @@ export default function ChatScreen() {
       })
       .catch((e) => console.warn('Compaction error', e))
       .finally(() => {
+        endSummaryWork?.();
         compactionRef.current = null;
         setCompacting(false);
       });
@@ -330,10 +333,22 @@ export default function ChatScreen() {
   }, [continueFrom, continueChat, router]);
 
 
+  // "Reply ready" notification → llmchat:///?openSession=<id>.
+  useEffect(() => {
+    if (!openSession) return;
+    switchSession(openSession).finally(() => router.setParams({ openSession: undefined }));
+  }, [openSession, switchSession, router]);
+
+  // The ongoing notification's Stop button: same as Stop in the app.
+  useEffect(() => onStopRequest(() => {
+    llama.stopGeneration();
+    stopCompaction();
+  }), [stopCompaction]);
+
   // Generate a reply to `parentId` (a user message) from the conversation
   // leading up to it. The reply is added as a new version under that message,
   // or, with `cont`, appended to that stopped or cut-off reply.
-  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord, parentId: string, cont?: MessageRecord) => {
+  const generateReply = useCallback(async (sessionId: string, loadedModel: ModelRecord, parentId: string, cont?: MessageRecord) => {
     // Re-read the session so edits made on the chat-settings screen apply.
     const fresh = await db.getSession(sessionId);
     if (!fresh) return;
@@ -374,6 +389,7 @@ export default function ChatScreen() {
     } catch {}
 
     let saved = false;
+    let notice: { title: string; body: string; subtitle?: string | null } | null = null;
     try {
       const systemPrompt = await db.buildSystemMessage(fresh, currentMsgs);
       const chatMessages = [
@@ -421,12 +437,15 @@ export default function ChatScreen() {
         saved = true;
       }
       await db.updateSession(sessionId, { updatedAt: Date.now() });
+      // Stopped by you (in the app or from the notification): nothing to announce.
+      if (saved && !result.stopped) notice = replyReadyNotice(result.content, fresh.title ?? null);
 
       const finalMsgs = await db.getSessionMessages(sessionId);
       setMessages(finalMsgs);
     } catch (e) {
       console.warn('Generation error', e);
       setSnack('Generation failed: ' + String((e as any)?.message ?? e));
+      notice = { title: "Reply didn't finish", body: String((e as any)?.message ?? e), subtitle: fresh.title ?? null };
     } finally {
       setIsStreaming(false);
       setStream(EMPTY_STREAM);
@@ -438,7 +457,28 @@ export default function ChatScreen() {
     }
     // The chat may be getting long: condense older messages in the background.
     if (saved) startCompaction(sessionId, model);
+    // Finished while you were away (screen off, another app): tell you.
+    if (notice && AppState.currentState !== 'active') backgroundWork.notifyDone({ ...notice, sessionId });
   }, [modelCtx, startCompaction]);
+
+  // The foreground service keeps the model running with the screen off, from
+  // the model load to the end of the reply (and on into a summary).
+  const runGeneration = useCallback(async (sessionId: string, loadedModel: ModelRecord, parentId: string, cont?: MessageRecord) => {
+    const end = backgroundWork.begin('reply');
+    try {
+      await generateReply(sessionId, loadedModel, parentId, cont);
+    } finally {
+      end();
+    }
+  }, [generateReply]);
+
+  // Android 13+: "Reply ready" needs permission. Asked once, on the first send.
+  const askNotificationsOnce = useCallback(async () => {
+    if (Platform.OS !== 'android' || Number(Platform.Version) < 33) return;
+    if (await db.getSetting('notificationsAsked')) return;
+    await db.setSetting('notificationsAsked', '1');
+    try { await PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS' as any); } catch {}
+  }, []);
 
   // Send message
   const sendMessage = useCallback(async (text: string) => {
@@ -447,6 +487,7 @@ export default function ChatScreen() {
     if (!model) return;
     generatingRef.current = true;
     try {
+      await askNotificationsOnce();
       await stopCompaction();
       // An edit becomes a new version of the edited message; the old version
       // and the replies after it stay available through the version switcher.
@@ -483,7 +524,7 @@ export default function ChatScreen() {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions, stopCompaction]);
+  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions, stopCompaction, askNotificationsOnce]);
 
   // Stop
   const handleStop = useCallback(() => {
