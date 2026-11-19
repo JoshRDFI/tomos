@@ -928,7 +928,9 @@ export default function ChatScreen() {
       <Snackbar
         visible={!!continueHint && continueHint === session?.id}
         onDismiss={() => setContinueHint(null)}
-        duration={10000}
+        onIconPress={() => setContinueHint(null)}
+        // Stays until answered: it shows once per chat.
+        duration={Number.POSITIVE_INFINITY}
         action={{ label: 'Continue', onPress: () => { const id = continueHint; setContinueHint(null); if (id) continueChat(id); } }}
       >
         This chat has been condensed several times. Continue in a new chat?
