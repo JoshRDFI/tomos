@@ -24,7 +24,9 @@ Everything runs on the phone. There are no accounts, no analytics, no ads and no
 - Chat history with full-text search, rename, and export to Markdown or text.
 - **Personas.** Instructions plus an optional greeting, example exchanges and sampling settings, picked per chat. Import a `soul.md` (or any Markdown file) as a persona, and export them the same way. [`personas/soul.md`](personas/soul.md) is a commented template showing every field.
 - Chat templates: auto (from the file), ChatML, Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca, raw.
-- **Long chats keep their thread.** When a chat fills the context window, the model condenses older messages into a summary it keeps reading (you can view it; every message stays saved). **Continue in a new chat** carries the summary and recent messages into a fresh chat with a link back.
+- **Long chats keep their thread.** When a chat fills the context window, the model condenses older messages into a summary it keeps reading (you can view it; every message stays saved). **Continue in a new chat** carries the summary and your last exchange into a fresh chat with a link back.
+- **Edit the model's replies** (long-press → Edit reply) to cut a repeated line before it becomes a habit; the original stays as a version. DRY repetition penalty is on by default.
+- **Keeps going with the screen off.** A reply keeps generating when you lock the phone or switch apps, with a notification (and Stop); you're notified when it's ready.
 - Dark, light and system themes.
 - Backups of chats, personas and settings (model files aren't included).
 - About screen with every open-source license that ships in the app.

@@ -48,5 +48,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.log
+# Local planning notes (never committed)
 .superpowers/
+docs/superpowers/
 react_native_space/modules/*/android/build/

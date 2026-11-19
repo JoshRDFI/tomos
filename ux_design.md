@@ -1,6 +1,6 @@
 # LLM Chat — UX Spec (Android, on-device, offline)
 
-> Living spec. Updated 2026-11-15 to match the code on `feature/model-settings`: layered llama.cpp settings, per-model settings, About & licenses, context fitting, chronological message list. Items marked **(planned)** are on the roadmap at the end and not built yet.
+> Living spec: describes the app as built. Items marked **(planned)** are on the roadmap at the end and not built yet.
 
 App name **LLM Chat**, Android package `com.rdfindustries.llmchat`, URL scheme `llmchat`.
 
@@ -539,20 +539,25 @@ No gradients and no glass effects.
 </component_standards>
 
 <roadmap>
-In order (tracked in Archon):
-1. ~~Layered llama.cpp settings, per-model settings, About & licenses~~ (done, `feature/model-settings`)
-2. ~~Separate thinking display~~ (done, `feature/thinking-display`)
-3. ~~Full markdown rendering (headings, lists, tables, links) with throttled streaming updates~~ (done, `feature/markdown`)
-4. ~~Message branching: keep alternative replies and edited prompts as branches with a switcher instead of deleting later messages~~ (done, `feature/branching`)
-5. ~~Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant label fix~~ (done, `feature/gguf-check`)
-6. ~~Continue a cut-off reply; optional current date in the system prompt; full backup/restore of chats, settings and model metadata~~ (done, `feature/continue-date-backup`)
-7. After import, offer to delete the original file (`feature/delete-original-after-import`, awaiting device test)
-8. ~~Download models in the app from Hugging Face, straight into app storage~~ (done, `feature/hf-download`)
-9. (planned) Save and restore each chat's KV cache so long chats reopen without re-reading the history
-10. (planned) Search: scroll to and highlight the matched message
-11. ~~Keep generating in the background (foreground service with a notification)~~ (done): "Generating reply…" with Stop while generating; "Reply ready" with the first line when it finishes while you're away, opening the chat
-12. (planned) Attach text and PDF files to a message
-13. (planned) Image input for vision models (mmproj)
-14. (planned) Voice input and read-aloud
-15. (planned) Auto-title chats; pin chats in the drawer
+Done:
+- Layered llama.cpp settings, per-model settings, About & licenses
+- Separate thinking display
+- Full markdown rendering (headings, lists, tables, links) with throttled streaming updates
+- Message branching: alternative replies and edited messages kept as versions with a switcher
+- Import-time GGUF format check (PQ2_0 / PTQ1_0 need the PrismML llama.cpp fork) and quant labels
+- Continue a cut-off reply; optional current date in the system prompt; full backup and restore
+- After import, offer to delete the original file
+- Download models from Hugging Face, straight into app storage
+- Personas (instructions, greeting, examples, settings; Markdown import and export)
+- Long chats: automatic summaries, "Continue in a new chat"
+- Edit a model's reply
+- Keep generating with the screen off: "Generating reply…" notification with Stop; "Reply ready" with the first line when it finishes while you're away, opening the chat
+
+Planned, roughly in order:
+1. (planned) Save and restore each chat's KV cache so long chats reopen without re-reading the history
+2. (planned) Search: scroll to and highlight the matched message
+3. (planned) Attach text and PDF files to a message
+4. (planned) Image input for vision models (mmproj)
+5. (planned) Voice input and read-aloud
+6. (planned) Auto-title chats; pin chats in the drawer
 </roadmap>
