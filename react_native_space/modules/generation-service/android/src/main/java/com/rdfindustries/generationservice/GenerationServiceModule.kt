@@ -18,6 +18,7 @@ import expo.modules.kotlin.records.Record
 class StartOptions : Record {
   @Field var title: String = "Tomos"
   @Field var text: String = "Generating…"
+  @Field var pausedText: String? = null
 }
 
 class DoneOptions : Record {
@@ -49,6 +50,8 @@ class GenerationServiceModule : Module() {
       val intent = Intent(context, GenerationService::class.java)
         .putExtra(GenerationService.EXTRA_TITLE, o.title)
         .putExtra(GenerationService.EXTRA_TEXT, o.text)
+        .putExtra(GenerationService.EXTRA_PAUSED_TEXT, o.pausedText)
+      GenerationService.cancelStop()
       try {
         if (Build.VERSION.SDK_INT >= 26) context.startForegroundService(intent) else context.startService(intent)
         true
@@ -59,8 +62,16 @@ class GenerationServiceModule : Module() {
     }
 
     Function("stop") {
-      context.stopService(Intent(context, GenerationService::class.java))
+      GenerationService.scheduleStop(context)
       Unit
+    }
+
+    Function("progress") { count: Long ->
+      GenerationService.recordProgress(count)
+    }
+
+    Function("takeSqueezed") {
+      GenerationService.takeSqueezed()
     }
 
     // Each core's top speed in kHz, to pick a thread count (lib/device.ts).
@@ -68,22 +79,6 @@ class GenerationServiceModule : Module() {
     Function("cpuMaxFrequencies") {
       val cpus = File("/sys/devices/system/cpu").listFiles { f -> f.name.matches(Regex("cpu\\d+")) } ?: emptyArray()
       cpus.mapNotNull { runCatching { File(it, "cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrNull() }
-    }
-
-    // The app's memory use and the limit Android 17's Memory Limiter sets on
-    // it (cgroup v2, on the cgroup that holds all of the app's processes).
-    // high is null when there's no limit; null overall when unreadable.
-    Function("memoryState") {
-      try {
-        val path = File("/proc/self/cgroup").readLines().firstOrNull { it.startsWith("0::") }?.removePrefix("0::")
-          ?: return@Function null
-        val app = File("/sys/fs/cgroup$path").parentFile ?: return@Function null
-        val current = File(app, "memory.current").readText().trim().toLong()
-        val high = File(app, "memory.high").readText().trim().let { if (it == "max") null else it.toLong() }
-        mapOf("current" to current.toDouble(), "high" to high?.toDouble())
-      } catch (e: Exception) {
-        null
-      }
     }
 
     Function("isIgnoringBatteryOptimizations") {

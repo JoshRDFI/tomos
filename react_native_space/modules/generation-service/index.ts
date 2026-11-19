@@ -1,10 +1,11 @@
 import { requireNativeModule } from 'expo-modules-core';
 
 interface GenerationServiceNative {
-  start(o: { title: string; text: string }): boolean;
+  start(o: { title: string; text: string; pausedText?: string | null }): boolean;
   stop(): void;
   notifyDone(o: { title: string; body: string; subtitle: string | null; sessionId: string }): void;
-  memoryState(): { current: number; high: number | null } | null;
+  progress(count: number): void;
+  takeSqueezed(): boolean;
   cpuMaxFrequencies(): number[];
   isIgnoringBatteryOptimizations(): boolean;
   requestIgnoreBatteryOptimizations(): boolean;

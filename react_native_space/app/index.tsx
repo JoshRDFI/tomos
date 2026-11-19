@@ -404,7 +404,10 @@ export default function ChatScreen() {
         ...toChatMessages(promptPath(currentMsgs, await db.getSummaries(sessionId))),
       ];
 
-      const result = await llama.generate(model, chatMessages, completion, setStream, partial);
+      // Each update is a token; the background service uses the count to tell
+      // a reply that's still going from one that stalled off screen.
+      const onUpdate = (v: Parameters<typeof setStream>[0]) => { backgroundWork.progress(); setStream(v); };
+      const result = await llama.generate(model, chatMessages, completion, onUpdate, partial);
 
       if (result.droppedMessages > 0) {
         setSnack(`Conversation is longer than the context window; the oldest ${result.droppedMessages} message${result.droppedMessages === 1 ? ' was' : 's were'} left out.`);
