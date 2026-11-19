@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "LLM Chat",
-    "slug": "llm-chat",
+    "name": "Tomos",
+    "slug": "tomos",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.rdfindustries.llmchat",
+      "bundleIdentifier": "com.rdfindustries.tomos",
       "buildNumber": "1"
     },
     "android": {
@@ -19,7 +19,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.rdfindustries.llmchat",
+      "package": "com.rdfindustries.tomos",
       "versionCode": 1
     },
     "web": {
@@ -31,6 +31,6 @@
       "llama.rn",
       "expo-sqlite"
     ],
-    "scheme": "llmchat"
+    "scheme": "tomos"
   }
 }

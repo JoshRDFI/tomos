@@ -1,5 +1,5 @@
 ---
-# TEMPLATE: a persona for LLM Chat. Import it with Settings → Personas → Import,
+# TEMPLATE: a persona for Tomos. Import it with Settings → Personas → Import,
 # then change anything in the app's editor. Lines starting with # are notes.
 #
 # name: what the persona is called in the app. Without it, the file name is

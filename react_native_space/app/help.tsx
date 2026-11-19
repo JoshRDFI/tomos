@@ -54,7 +54,7 @@ const sections = [
   {
     title: 'Screen off and other apps',
     icon: 'cellphone-lock',
-    body: `A reply keeps going when you turn the screen off or switch apps. While it's writing, a "Generating reply…" notification shows, with Stop. If it finishes while you're away, you get a "Reply ready" notification with its first line; tap it to open the chat.\n\nAndroid asks once whether the app may send notifications. If you said no, replies still finish in the background, you just won't be told; you can allow it later in Android Settings → Apps → LLM Chat → Notifications.`,
+    body: `A reply keeps going when you turn the screen off or switch apps. While it's writing, a "Generating reply…" notification shows, with Stop. If it finishes while you're away, you get a "Reply ready" notification with its first line; tap it to open the chat.\n\nAndroid asks once whether the app may send notifications. If you said no, replies still finish in the background, you just won't be told; you can allow it later in Android Settings → Apps → Tomos → Notifications.`,
   },
   {
     title: 'Long chats',

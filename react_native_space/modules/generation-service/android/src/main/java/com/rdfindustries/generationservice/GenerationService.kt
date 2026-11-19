@@ -28,7 +28,7 @@ class GenerationService : Service() {
       onStopRequest?.invoke()
       return START_NOT_STICKY
     }
-    val title = intent?.getStringExtra(EXTRA_TITLE) ?: "LLM Chat"
+    val title = intent?.getStringExtra(EXTRA_TITLE) ?: "Tomos"
     val text = intent?.getStringExtra(EXTRA_TEXT) ?: "Generating…"
     val notification = buildOngoing(this, title, text)
     if (Build.VERSION.SDK_INT >= 34) {
@@ -38,7 +38,7 @@ class GenerationService : Service() {
     }
     if (wakeLock == null) {
       val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "LLMChat:generation").apply {
+      wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Tomos:generation").apply {
         setReferenceCounted(false)
         // Safety net: a reply never needs this long; the app stops the service when it's done.
         acquire(60 * 60 * 1000L)

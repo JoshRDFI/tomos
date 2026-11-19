@@ -9,7 +9,7 @@
  * Copyright (c) 2026 DeepSeek; full notice in lib/markdown.ts).
  */
 
-export const BACKUP_FORMAT = 'llmchat-backup';
+export const BACKUP_FORMAT = 'tomos-backup';
 export const BACKUP_VERSION = 2;
 
 type Row = Record<string, unknown>;
@@ -101,7 +101,7 @@ export function buildInsert(table: string, row: Row, columns: string[]): { sql: 
 
 export function backupFileName(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `llmchat-backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.json`;
+  return `tomos-backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}.json`;
 }
 
 export function summarize(b: Backup): string {

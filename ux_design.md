@@ -1,8 +1,8 @@
-# LLM Chat — UX Spec (Android, on-device, offline)
+# Tomos — UX Spec (Android, on-device, offline)
 
 > Living spec: describes the app as built. Items marked **(planned)** are on the roadmap at the end and not built yet.
 
-App name **LLM Chat**, Android package `com.rdfindustries.llmchat`, URL scheme `llmchat`.
+App name **Tomos**, Android package `com.rdfindustries.tomos`, URL scheme `tomos`.
 
 ## Platform and runtime notes (binding)
 - Target: Android APK / dev build on a Pixel 9 Pro XL (about 16 GB RAM). `llama.rn` is a native module and does not run in Expo Go. On web, show one full-screen notice: "On-device inference requires the Android app". No other web support is needed.
@@ -376,7 +376,7 @@ Reached from the drawer's "Settings" row. One scrolling page:
 - **Model settings for all chats:** a `ParamEditor` for the global layer (inherits only app defaults). Debounced save, flushed on leave.
 - **Settings per model:** one row per library model with a summary ("3 from model file · 2 customized" or "Using settings for all chats") → push Model settings. With no models, an "Add a model" button.
 - **Backup:** "All chats (with every version), personas and settings, as one JSON file…".
-  - "Back up" writes `llmchat-backup-YYYY-MM-DD.json` (`lib/backup.ts`, format `llmchat-backup` v1) and opens the share sheet (save to Files/Drive, send, …).
+  - "Back up" writes `tomos-backup-YYYY-MM-DD.json` (`lib/backup.ts`, format `tomos-backup` v1) and opens the share sheet (save to Files/Drive, send, …).
   - "Restore…" picks a file, validates it (snackbar with the reason if it isn't a backup, is from a newer app version, or is damaged), then asks "Replace everything with this backup?" with "N chats, M messages, from DATE". Replace runs in one transaction: chats, messages, personas and settings are replaced; `lastModelId` stays; model files and the model list stay, and models matching a backup entry by file name and size get its name, template and settings; chats on other models keep no model. Disabled while a reply is generating.
 - **About & licenses** row → push About.
 

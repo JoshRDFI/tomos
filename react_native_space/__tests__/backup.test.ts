@@ -65,7 +65,7 @@ describe('restore helpers', () => {
   });
 
   it('names the file by date', () => {
-    expect(backupFileName(new Date(2026, 0, 5))).toBe('llmchat-backup-2026-01-05.json');
+    expect(backupFileName(new Date(2026, 0, 5))).toBe('tomos-backup-2026-01-05.json');
   });
 });
 

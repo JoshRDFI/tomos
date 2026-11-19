@@ -2,9 +2,15 @@
   <img src="react_native_space/assets/rdfi-logo-small.png" width="96" alt="RDF Industries logo">
 </p>
 
-# LLM Chat
+# Tomos
 
-**An RDF Industries app.** Run language models on your Android phone, fully offline. LLM Chat loads GGUF models with [llama.cpp](https://github.com/ggml-org/llama.cpp) (through [llama.rn](https://github.com/mybigday/llama.rn)) and keeps every chat, setting and model file on the device.
+**An RDF Industries app.** Run language models on your Android phone, fully offline. Tomos loads GGUF models with [llama.cpp](https://github.com/ggml-org/llama.cpp) (through [llama.rn](https://github.com/mybigday/llama.rn)) and keeps every chat, setting and model file on the device.
+
+## Why "Tomos"
+
+Greek scribes wrote long works on rolls of papyrus, and a single roll was a *tomos* (τόμος), literally "a cut", from *temnein*, "to cut": a length cut from the papyrus. It later came to mean a volume, and gave English the word "tome".
+
+The name fits twice. The app is meant to be just the scroll: a plain surface to read and write on, with nothing between you and the words. And the models it runs are small cuts of something much larger, trimmed to fit in a pocket.
 
 ## Privacy
 
@@ -61,7 +67,7 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 
 The generated project signs release builds with the **debug key**. That's fine for your own phone, but anything you give to other people should be your own app:
 
-1. **Use your own application ID.** In `react_native_space/app.json`, change `expo.android.package` from `com.rdfindustries.llmchat` to an ID you own, and run `npx expo prebuild --platform android --clean`.
+1. **Use your own application ID.** In `react_native_space/app.json`, change `expo.android.package` from `com.rdfindustries.tomos` to an ID you own, and run `npx expo prebuild --platform android --clean`.
 2. **Use your own name and icon.** Change `expo.name` in `app.json` (the app reads its name from there) and replace the icon files in `react_native_space/assets/` (`icon.png`, `android-icon-*.png`, `favicon.png`). The RDF Industries name and logo aren't covered by the code license; see [License](#license).
 3. **Sign with your own key.** Add a `signingConfigs.release` block that reads the keystore path and password from `~/.gradle/gradle.properties` or environment variables, or sign the APK with `apksigner`. Keep the key safe: Android only installs updates signed with the same key.
 

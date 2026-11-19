@@ -13,7 +13,7 @@ import expo.modules.kotlin.records.Field
 import expo.modules.kotlin.records.Record
 
 class StartOptions : Record {
-  @Field var title: String = "LLM Chat"
+  @Field var title: String = "Tomos"
   @Field var text: String = "Generating…"
 }
 
@@ -60,10 +60,10 @@ class GenerationServiceModule : Module() {
       Unit
     }
 
-    // "Reply ready": tapping it opens the chat (llmchat:///?openSession=<id>).
+    // "Reply ready": tapping it opens the chat (tomos:///?openSession=<id>).
     Function("notifyDone") { o: DoneOptions ->
       val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-      val uri = Uri.parse("llmchat:///?openSession=" + Uri.encode(o.sessionId))
+      val uri = Uri.parse("tomos:///?openSession=" + Uri.encode(o.sessionId))
       val b = GenerationService.builder(context, GenerationService.CHANNEL_DONE)
         .setSmallIcon(R.drawable.ic_stat_generation)
         .setContentTitle(o.title)

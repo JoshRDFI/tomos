@@ -333,7 +333,7 @@ export default function ChatScreen() {
   }, [continueFrom, continueChat, router]);
 
 
-  // "Reply ready" notification → llmchat:///?openSession=<id>.
+  // "Reply ready" notification → tomos:///?openSession=<id>.
   useEffect(() => {
     if (!openSession) return;
     switchSession(openSession).finally(() => router.setParams({ openSession: undefined }));

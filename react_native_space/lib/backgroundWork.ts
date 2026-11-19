@@ -42,7 +42,7 @@ export function createBackgroundWork(getNative: () => BackgroundNative | null, o
     begin(kind: WorkKind): () => void {
       if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
       active++;
-      call('start', (n) => { if (!n.start({ title: 'LLM Chat', text: TEXT[kind] })) console.warn('[bg] service not started'); });
+      call('start', (n) => { if (!n.start({ title: 'Tomos', text: TEXT[kind] })) console.warn('[bg] service not started'); });
       let ended = false;
       return () => {
         if (ended) return;
