@@ -39,7 +39,7 @@ const sections = [
   {
     title: 'Thinking models',
     icon: 'lightbulb-outline',
-    body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off, add the "Thinking" setting and switch it off (for one chat, a model, or all chats). Setting "Reasoning format" to None shows the raw output, tags included.`,
+    body: `Reasoning models (Qwen3, Bonsai, DeepSeek-R1 and others) think before they answer. The thinking appears in a collapsible "Thinking" section above the answer: open while the model thinks, then folded to "Thought for N s". Tap it to read the thinking.\n\nOnly the answer is copied, exported as text, searched, and sent back to the model in later turns. Markdown exports include the thinking in a collapsed block.\n\nTo turn thinking off for one chat, use the Thinking switch in Chat settings. For a model or all chats, add the "Thinking" setting in its settings and switch it off.\n\nAbliterated and "heretic" models (versions with their refusals removed) tend to work best with thinking off: their thinking is more likely to wander or run long. Turning it off for that model (Settings → its model → Thinking) saves doing it in every chat. Setting "Reasoning format" to None shows the raw output, tags included.`,
   },
   {
     title: 'Personas',
