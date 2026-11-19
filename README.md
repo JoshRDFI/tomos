@@ -43,7 +43,9 @@ There are no published builds yet. To use it now, build it yourself (below).
 
 ## Requirements
 
-- An Android phone with arm64. Built for a Pixel 9 Pro XL (16 GB RAM); 3B–8B models at Q4_K_M are the sweet spot.
+- A 64-bit (arm64) Android phone, Android 7 or newer. Developed and tested on a Pixel 9 Pro XL (16 GB RAM); other phones should work but haven't been tested.
+- Memory decides model size: 8 GB of RAM runs 3–4B models, 12 GB or more runs 7–8B. Q4_K_M is the sweet spot.
+- Samsung, Xiaomi, OnePlus and some other phones stop background apps to save battery; the app asks once to be allowed to run in the background so replies finish with the screen off.
 - To build: Node 20+, corepack (yarn 4), JDK 17+, the Android SDK (platform 35/36). No NDK setup for llama.cpp is needed; llama.rn ships prebuilt libraries.
 
 ## Build it yourself

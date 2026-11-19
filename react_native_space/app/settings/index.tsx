@@ -11,7 +11,8 @@ import { useModelContext } from '@/contexts/ModelContext';
 import type { ModelRecord, ThemeMode, Persona } from '@/types';
 import * as db from '@/lib/db';
 import ParamEditor from '@/components/params/ParamEditor';
-import { parseParamSet, resolveParams, type ParamSet } from '@/lib/params';
+import { appDefaultsFor, parseParamSet, resolveParams, type ParamSet } from '@/lib/params';
+import { defaultThreads } from '@/lib/device';
 import { dateSentence } from '@/lib/dateContext';
 import { BackupError, backupFileName, parseBackup, summarize, type Backup } from '@/lib/backup';
 
@@ -210,7 +211,7 @@ export default function SettingsScreen() {
         <Text style={[styles.note, { color: c.textSecondary }]}>
           llama.cpp settings used everywhere. A model's own settings (below) and a chat's settings take priority.
         </Text>
-        <ParamEditor overrides={globalParams} inherited={resolveParams({})} onChange={updateGlobal} />
+        <ParamEditor overrides={globalParams} inherited={resolveParams({ app: appDefaultsFor(null, defaultThreads()) })} onChange={updateGlobal} />
 
         {/* Per-model */}
         <Text style={[styles.section, { color: c.text, marginTop: spacing.md }]}>Settings per model</Text>

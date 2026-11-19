@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView, Keyboard, PermissionsAndroid } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView, Keyboard, PermissionsAndroid, Alert } from 'react-native';
 import * as downloader from '@/lib/downloader';
 import { syncDownloads } from '@/lib/downloads';
 import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
@@ -27,6 +27,8 @@ import EmptyChat from '@/components/chat/EmptyChat';
 import { toChatMessages } from '@/lib/prompt';
 import { editedReply } from '@/lib/editReply';
 import { backgroundWork, onStopRequest, replyReadyNotice } from '@/lib/backgroundWork';
+import { requestBatteryExemption, shouldAskBatteryExemption } from '@/lib/device';
+import { APP_NAME } from '@/constants/app';
 import { isChatEmpty } from '@/lib/personas';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
@@ -480,6 +482,21 @@ export default function ChatScreen() {
     try { await PermissionsAndroid.request('android.permission.POST_NOTIFICATIONS' as any); } catch {}
   }, []);
 
+  // Samsung, Xiaomi and similar phones stop background apps even while a reply
+  // is generating, unless battery optimization is off for the app. Asked once.
+  const askBatteryOnce = useCallback(async () => {
+    if (!shouldAskBatteryExemption()) return;
+    if (await db.getSetting('batteryAsked')) return;
+    await db.setSetting('batteryAsked', '1');
+    const allow = await new Promise<boolean>((resolve) => Alert.alert(
+      'Keep replies going in the background?',
+      `Your phone stops apps in the background to save battery, which cuts off a reply when the screen turns off. Let ${APP_NAME} run in the background so replies finish; it only does so while a reply is being written.`,
+      [{ text: 'Not now', style: 'cancel', onPress: () => resolve(false) }, { text: 'Allow', onPress: () => resolve(true) }],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    ));
+    if (allow) requestBatteryExemption();
+  }, []);
+
   // Send message
   const sendMessage = useCallback(async (text: string) => {
     if (isWeb || !session || generatingRef.current) return;
@@ -488,6 +505,7 @@ export default function ChatScreen() {
     generatingRef.current = true;
     try {
       await askNotificationsOnce();
+      await askBatteryOnce();
       await stopCompaction();
       // An edit becomes a new version of the edited message; the old version
       // and the replies after it stay available through the version switcher.
@@ -524,7 +542,7 @@ export default function ChatScreen() {
       generatingRef.current = false;
     }
     refreshSessions();
-  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions, stopCompaction, askNotificationsOnce]);
+  }, [isWeb, session, modelCtx.loadedModel, editMode, messages, runGeneration, refreshSessions, stopCompaction, askNotificationsOnce, askBatteryOnce]);
 
   // Stop
   const handleStop = useCallback(() => {

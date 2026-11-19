@@ -34,8 +34,7 @@ export const APP_DEFAULTS: ParamSet = {
   penalty_last_n: 512,
   n_predict: 1024,
   n_ctx: DEFAULT_N_CTX,
-  // Phones mix fast and efficiency cores (Pixel 9 / Tensor G4: 4 fast + 4 slow).
-  // More threads than fast cores usually slows generation down.
+  // Used when the phone's fast-core count can't be read (see lib/device.ts).
   n_threads: 4,
 };
 
@@ -93,9 +92,10 @@ export interface ResolvedParams {
   sources: Record<string, ParamSource>;
 }
 
-/** App defaults for a model: the default context, capped at what it was trained for. */
-export function appDefaultsFor(trainedContext: number | null | undefined): ParamSet {
-  return trainedContext && trainedContext < DEFAULT_N_CTX ? { ...APP_DEFAULTS, n_ctx: trainedContext } : APP_DEFAULTS;
+/** App defaults for a model: the default context, capped at what it was trained for, and the phone's thread count when known. */
+export function appDefaultsFor(trainedContext: number | null | undefined, threads?: number): ParamSet {
+  const d = threads ? { ...APP_DEFAULTS, n_threads: threads } : APP_DEFAULTS;
+  return trainedContext && trainedContext < DEFAULT_N_CTX ? { ...d, n_ctx: trainedContext } : d;
 }
 
 const LAYER_ORDER: ParamSource[] = ['app', 'global', 'file', 'model', 'persona', 'chat'];

@@ -14,7 +14,7 @@ const sections = [
   {
     title: 'Which quantization?',
     icon: 'chip',
-    body: `On a Pixel 9 Pro XL (~16 GB RAM), Q4_K_M is the best balance of quality and speed, and Q5_K_M is slightly better quality but larger.\n\nApproximate file sizes:\n• 3B Q4_K_M ≈ 2 GB\n• 7–8B Q4_K_M ≈ 4.5–5 GB\n• 8B Q5_K_M ≈ 5.7 GB\n\nAvoid models over ~9 GB. Larger context lengths also use more memory.`,
+    body: `Q4_K_M is the best balance of quality and speed; Q5_K_M is slightly better quality but larger.\n\nApproximate file sizes:\n• 3B Q4_K_M ≈ 2 GB\n• 7–8B Q4_K_M ≈ 4.5–5 GB\n• 8B Q5_K_M ≈ 5.7 GB\n\nWhat fits depends on your phone's memory (RAM):\n• 8 GB: up to 3–4B models\n• 12 GB: up to 7–8B models\n• 16 GB: 7–8B comfortably; avoid models over ~9 GB\n\nLarger context lengths also use more memory.`,
   },
   {
     title: 'Where to find models',
@@ -54,7 +54,7 @@ const sections = [
   {
     title: 'Screen off and other apps',
     icon: 'cellphone-lock',
-    body: `A reply keeps going when you turn the screen off or switch apps. While it's writing, a "Generating reply…" notification shows, with Stop. If it finishes while you're away, you get a "Reply ready" notification with its first line; tap it to open the chat.\n\nAndroid asks once whether the app may send notifications. If you said no, replies still finish in the background, you just won't be told; you can allow it later in Android Settings → Apps → Tomos → Notifications.`,
+    body: `A reply keeps going when you turn the screen off or switch apps. While it's writing, a "Generating reply…" notification shows, with Stop. If it finishes while you're away, you get a "Reply ready" notification with its first line; tap it to open the chat.\n\nAndroid asks once whether the app may send notifications. If you said no, replies still finish in the background, you just won't be told; you can allow it later in Android Settings → Apps → Tomos → Notifications.\n\nSome phones (Samsung, Xiaomi, OnePlus and others) stop apps in the background to save battery, even mid-reply. On those, the app asks once to run in the background. If you said no, or replies stop when the screen is off, set Android Settings → Apps → Tomos → Battery to Unrestricted.`,
   },
   {
     title: 'Long chats',
@@ -69,7 +69,7 @@ const sections = [
   {
     title: 'Performance tips',
     icon: 'speedometer',
-    body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Context length is 8192 by default (less if the model was trained for less). Lower it to 4096 if a model loads slowly or the app runs out of memory; raise it for fewer summaries in long chats.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
+    body: `• Threads: the default is your phone's number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Context length is 8192 by default (less if the model was trained for less). Lower it to 4096 if a model loads slowly or the app runs out of memory; raise it for fewer summaries in long chats.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
   },
 ];
 

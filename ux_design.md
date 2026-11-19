@@ -135,7 +135,7 @@ App defaults:
 | penalty_repeat | 1.1 |
 | n_predict | 1024 |
 | n_ctx | 8192, or the model's trained context if smaller (`appDefaultsFor`) |
-| n_threads | 4 (the number of fast cores on Tensor G4; the first app version used 6) |
+| n_threads | the phone's fast cores (within 80% of the top core's speed, read once from sysfs; 4 on Tensor G4, 4 if unreadable; the first app version used 6) |
 
 The resolved set is split into **load** settings (passed to `initLlama`: `n_ctx`, `n_threads`, `n_batch`, `n_gpu_layers`, `flash_attn_type`, `cache_type_k/v`, `use_mmap`, `chat_template`, …) and **completion** settings (passed to `completion`). Each resolved value remembers which layer it came from, so the editor can say "from model file", "from all chats", etc.
 
@@ -418,7 +418,7 @@ Static sections as Paper List.Accordion items:
 4. **Copying files to the phone:** USB cable to the Downloads folder (File Transfer mode), Android Files app, or downloading directly on the phone in a browser. Then use Models → Add GGUF model. The app copies the file into its own storage and then offers to delete the original to save space.
 5. **Chat templates:** Auto reads the template from the file. If replies look garbled or never stop, set the matching template in Models.
 6. **Model settings (llama.cpp):** the five layers, Add setting / Custom… / Paste flags, and that "reloads model" settings apply before the next reply.
-7. **Performance tips:** threads = number of fast cores (4 on a Pixel 9). Context is 8192 by default; lower to 4096 if a model loads slowly or runs out of memory. The first load is slower.
+7. **Performance tips:** threads default to the phone's fast cores (4 on a Pixel 9). Context is 8192 by default; lower to 4096 if a model loads slowly or runs out of memory. The first load is slower.
 
 </screens>
 

@@ -157,3 +157,11 @@ describe('default context length', () => {
     expect(LEGACY_DEFAULTS).toEqual({ temperature: 0.7, top_p: 0.9, top_k: 40, min_p: 0.05, penalty_repeat: 1.1, n_predict: 1024, n_ctx: 4096, n_threads: 6 });
   });
 });
+
+describe('thread default', () => {
+  it("uses the phone's fast-core count when known", () => expect(appDefaultsFor(null, 6).n_threads).toBe(6));
+  it('falls back to 4', () => expect(appDefaultsFor(null).n_threads).toBe(4));
+  it('a saved thread setting still wins', () => {
+    expect(resolveParams({ app: appDefaultsFor(null, 6), global: { n_threads: 3 } }).values.n_threads).toBe(3);
+  });
+});

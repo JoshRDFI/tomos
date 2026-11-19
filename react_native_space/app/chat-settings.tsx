@@ -10,6 +10,7 @@ import { useSettings } from '@/contexts/SettingsContext';
 import * as db from '@/lib/db';
 import type { SessionRecord, Persona } from '@/types';
 import ParamEditor from '@/components/params/ParamEditor';
+import { defaultThreads } from '@/lib/device';
 import { importPersonaFromFile } from '@/lib/personaImport';
 import { ensureFileParams } from '@/lib/modelMeta';
 import { appDefaultsFor, parseParamSet, resolveParams, serializeParamSet, thinkingEnabled, type ParamSet, type ResolvedParams } from '@/lib/params';
@@ -50,7 +51,7 @@ export default function ChatSettingsScreen() {
       let model = modelId ? await db.getModel(modelId) : null;
       if (model) model = await ensureFileParams(model);
       setModelName(model?.displayName ?? null);
-      const layers = { app: appDefaultsFor(model?.trainedContext), global: await db.getGlobalParams(), file: parseParamSet(model?.fileParams), model: parseParamSet(model?.paramsOverride) };
+      const layers = { app: appDefaultsFor(model?.trainedContext, defaultThreads()), global: await db.getGlobalParams(), file: parseParamSet(model?.fileParams), model: parseParamSet(model?.paramsOverride) };
       setBaseLayers(layers);
       const p = await db.getAllPersonas();
       setPresets(p);

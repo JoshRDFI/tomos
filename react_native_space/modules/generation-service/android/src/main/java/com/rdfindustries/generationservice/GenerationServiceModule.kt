@@ -5,6 +5,9 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import java.io.File
 import android.util.Log
 import expo.modules.kotlin.exception.Exceptions
 import expo.modules.kotlin.modules.Module
@@ -58,6 +61,35 @@ class GenerationServiceModule : Module() {
     Function("stop") {
       context.stopService(Intent(context, GenerationService::class.java))
       Unit
+    }
+
+    // Each core's top speed in kHz, to pick a thread count (lib/device.ts).
+    // Cores whose speed can't be read are left out.
+    Function("cpuMaxFrequencies") {
+      val cpus = File("/sys/devices/system/cpu").listFiles { f -> f.name.matches(Regex("cpu\\d+")) } ?: emptyArray()
+      cpus.mapNotNull { runCatching { File(it, "cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrNull() }
+    }
+
+    Function("isIgnoringBatteryOptimizations") {
+      val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+      pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+
+    // Android's "let the app run in the background?" dialog; the battery
+    // settings list if a phone doesn't offer that dialog.
+    Function("requestIgnoreBatteryOptimizations") {
+      val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + context.packageName))
+      val list = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+      val activity = appContext.currentActivity
+      listOf(direct, list).any { intent ->
+        try {
+          if (activity != null) activity.startActivity(intent) else context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+          true
+        } catch (e: Exception) {
+          Log.w("GenerationService", "battery settings: ${e.message}")
+          false
+        }
+      }
     }
 
     // "Reply ready": tapping it opens the chat (tomos:///?openSession=<id>).
