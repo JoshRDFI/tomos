@@ -26,6 +26,9 @@ export const APP_DEFAULTS: ParamSet = {
   // DRY catches a model copying whole sentences from earlier replies, which the
   // repeat penalty (last 64 tokens only) can't see.
   dry_multiplier: 0.8,
+  // Presence, frequency and repeat penalty only see this many recent tokens;
+  // llama.cpp's 64 is a few sentences, too short to see the previous reply.
+  penalty_last_n: 512,
   n_predict: 1024,
   n_ctx: 4096,
   // Phones mix fast and efficiency cores (Pixel 9 / Tensor G4: 4 fast + 4 slow).

@@ -25,6 +25,7 @@ import ContinuedChip from '@/components/chat/ContinuedChip';
 import ChatInput from '@/components/chat/ChatInput';
 import EmptyChat from '@/components/chat/EmptyChat';
 import { toChatMessages } from '@/lib/prompt';
+import { editedReply } from '@/lib/editReply';
 import { isChatEmpty } from '@/lib/personas';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
@@ -68,6 +69,7 @@ export default function ChatScreen() {
   const [deleteDialog, setDeleteDialog] = useState<SessionRecord | null>(null);
   const [renameText, setRenameText] = useState('');
   const [longPressMsg, setLongPressMsg] = useState<MessageRecord | null>(null);
+  const [replyEdit, setReplyEdit] = useState<{ msg: MessageRecord; text: string } | null>(null);
 
   // refs removed - DrawerLayout and FlashList v2 don't support them in this way
   const isWeb = Platform.OS === 'web';
@@ -613,6 +615,18 @@ export default function ChatScreen() {
     setLongPressMsg(null);
   }, [longPressMsg]);
 
+  // Edit a reply: saved as a new version, so the model sees the edited text
+  // from here on and the original stays one tap away.
+  const saveReplyEdit = useCallback(async () => {
+    if (!session || !replyEdit || generatingRef.current) return;
+    const text = replyEdit.text.trim();
+    if (!text) return;
+    await stopCompaction();
+    await db.insertMessage(editedReply(replyEdit.msg, text, db.generateId(), Date.now()));
+    setReplyEdit(null);
+    setMessages(await db.getSessionMessages(session.id));
+  }, [session, replyEdit, stopCompaction]);
+
   // Render
   const drawerWidth = Math.min(screenWidth * 0.84, 360);
   const modelReady = modelCtx.status === 'ready';
@@ -868,12 +882,37 @@ export default function ChatScreen() {
           </Dialog.Actions>
         </Dialog>
 
+        <Dialog visible={!!replyEdit} onDismiss={() => setReplyEdit(null)}>
+          <Dialog.Title>Edit reply</Dialog.Title>
+          <Dialog.ScrollArea style={{ maxHeight: 420, paddingHorizontal: 16 }}>
+            <ScrollView keyboardShouldPersistTaps="handled">
+              <PaperInput
+                value={replyEdit?.text ?? ''}
+                onChangeText={(t) => setReplyEdit((r) => (r ? { ...r, text: t } : r))}
+                mode="outlined"
+                multiline
+                style={{ backgroundColor: c.surfaceRaised, marginVertical: 8 }}
+              />
+              <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13, marginBottom: 8 }}>
+                Saved as a new version; the original stays under ‹ ›. Replies after this one stay with the original.
+              </Text>
+            </ScrollView>
+          </Dialog.ScrollArea>
+          <Dialog.Actions>
+            <Button onPress={() => setReplyEdit(null)}>Cancel</Button>
+            <Button onPress={saveReplyEdit} disabled={!replyEdit?.text.trim()}>Save</Button>
+          </Dialog.Actions>
+        </Dialog>
+
         {/* Long press menu */}
         <Dialog visible={!!longPressMsg} onDismiss={() => setLongPressMsg(null)}>
           <Dialog.Content style={{ gap: 4 }}>
             <Button icon="content-copy" onPress={() => { handleCopy(longPressMsg?.role === 'assistant' && !longPressMsg.reasoning ? splitThinking(longPressMsg.content ?? '').answer : (longPressMsg?.content ?? '')); setLongPressMsg(null); }}>Copy</Button>
             {longPressMsg?.role === 'user' && (
               <Button icon="pencil" onPress={handleEditResend}>Edit & resend</Button>
+            )}
+            {longPressMsg?.role === 'assistant' && !isStreaming && (
+              <Button icon="pencil" onPress={() => { const m = longPressMsg; setLongPressMsg(null); setReplyEdit({ msg: m, text: m.reasoning ? (m.content ?? '') : splitThinking(m.content ?? '').answer }); }}>Edit reply</Button>
             )}
             {longPressMsg?.role === 'assistant' && longPressMsg?.id === messages?.[messages.length - 1]?.id && (
               <Button icon="refresh" onPress={() => { setLongPressMsg(null); handleRegenerate(); }}>Regenerate</Button>

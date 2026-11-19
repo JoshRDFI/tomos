@@ -72,7 +72,7 @@ export const PARAM_CATALOG: ParamDef[] = [
   { key: 'penalty_freq', label: 'Frequency penalty', group: 'Repetition', scope: 'completion', kind: 'number', min: 0, max: 2, step: 0.05, llamaDefault: 0,
     help: 'Penalty that grows with how often a token appeared. 0 disables.' },
   { key: 'penalty_last_n', label: 'Repeat last N', group: 'Repetition', scope: 'completion', kind: 'int', min: -1, max: 4096, step: 16, llamaDefault: 64,
-    help: 'How many recent tokens the penalties look at. 0 disables, -1 uses the whole context.' },
+    help: 'How many recent tokens presence, frequency and repeat penalty look at. 0 disables, -1 uses the whole context; the app default is 512.' },
   { key: 'dry_multiplier', label: 'DRY multiplier', group: 'Repetition', scope: 'completion', kind: 'number', min: 0, max: 5, step: 0.05, llamaDefault: 0,
     help: 'DRY ("Don\'t Repeat Yourself") penalty strength for repeated sequences anywhere in the chat. 0 disables; the app default is 0.8.' },
   { key: 'dry_base', label: 'DRY base', group: 'Repetition', scope: 'completion', kind: 'number', min: 1, max: 4, step: 0.05, llamaDefault: 1.75,
