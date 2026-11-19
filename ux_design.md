@@ -274,7 +274,7 @@ Reserved keys that the app controls and the editor refuses: `model`, `prompt`, `
   - Build a string with title, model and date, then each message.
   - Markdown: `**You:**` / `**Assistant:**` with content as-is.
   - Text: `You:` / `Assistant:`.
-  - Write it to `cacheDirectory/<title>.md|.txt` and call `Sharing.shareAsync`.
+  - `lib/exportFile.ts` asks: **Save to phone** (Android's "save as" picker through `modules/save-file`, `ACTION_CREATE_DOCUMENT`, no storage permission) or **Share…** (writes to the cache and opens the share sheet). Personas and backups use the same choice.
 
 **Long chats**
 - After a reply, if the conversation fills over 70% of the space for the prompt, older messages are condensed in the background: a status line "Condensing earlier messages… N s" with **Stop** at the end of the list. The composer stays usable; sending stops it (nothing saved) and it's tried again after the next reply.
@@ -376,7 +376,7 @@ Reached from the drawer's "Settings" row. One scrolling page:
 - **Model settings for all chats:** a `ParamEditor` for the global layer (inherits only app defaults). Debounced save, flushed on leave.
 - **Settings per model:** one row per library model with a summary ("3 from model file · 2 customized" or "Using settings for all chats") → push Model settings. With no models, an "Add a model" button.
 - **Backup:** "All chats (with every version), personas and settings, as one JSON file…".
-  - "Back up" writes `tomos-backup-YYYY-MM-DD.json` (`lib/backup.ts`, format `tomos-backup` v1) and opens the share sheet (save to Files/Drive, send, …).
+  - "Back up" writes `tomos-backup-YYYY-MM-DD.json` (`lib/backup.ts`, format `tomos-backup` v1) and asks: save to the phone or share (`lib/exportFile.ts`).
   - "Restore…" picks a file, validates it (snackbar with the reason if it isn't a backup, is from a newer app version, or is damaged), then asks "Replace everything with this backup?" with "N chats, M messages, from DATE". Replace runs in one transaction: chats, messages, personas and settings are replaced; `lastModelId` stays; model files and the model list stay, and models matching a backup entry by file name and size get its name, template and settings; chats on other models keep no model. Disabled while a reply is generating.
 - **About & licenses** row → push About.
 
@@ -407,7 +407,7 @@ Shared by Settings, Model settings and Chat settings. Props: the overrides at th
   - Name (required, unique), Instructions (required), Greeting (optional), Example exchanges (User/Reply pairs, add/remove).
   - "About N tokens per message": the loaded model's tokenizer, else characters ÷ 4, for instructions + examples.
   - Settings: `ParamEditor` limited to per-completion settings, inheriting from all chats.
-  - Export (Markdown via the share sheet) and Delete (confirm; chats using it fall back to the default system prompt).
+  - Export (Markdown; save to the phone or share) and Delete (confirm; chats using it fall back to the default system prompt).
 - **Markdown format** (`lib/personaMarkdown.ts`): optional `---` front matter (`name:` and setting `key: value` lines), then the instructions, then optional `## Greeting` and `## Examples` (`User:` / `Assistant:` lines). A file with no front matter or sections is all instructions, named after the file (`soul.md` → "Soul").
 
 ### 7. Help (app/help.tsx)

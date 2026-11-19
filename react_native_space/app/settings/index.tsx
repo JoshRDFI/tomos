@@ -15,6 +15,7 @@ import { appDefaultsFor, parseParamSet, resolveParams, type ParamSet } from '@/l
 import { defaultThreads } from '@/lib/device';
 import { dateSentence } from '@/lib/dateContext';
 import { BackupError, backupFileName, parseBackup, summarize, type Backup } from '@/lib/backup';
+import { exportText } from '@/lib/exportFile';
 
 export default function SettingsScreen() {
   const theme = useTheme<AppTheme>();
@@ -39,12 +40,8 @@ export default function SettingsScreen() {
     setBackupBusy(true);
     try {
       const backup = await db.exportBackup();
-      const { Paths, File } = await import('expo-file-system');
-      const file = new File(Paths.cache, backupFileName(new Date()));
-      if (file.exists) file.delete();
-      file.write(JSON.stringify(backup));
-      const Sharing = await import('expo-sharing');
-      await Sharing.shareAsync(file.uri, { mimeType: 'application/json', dialogTitle: 'Save backup' });
+      const r = await exportText({ name: backupFileName(new Date()), mimeType: 'application/json', content: JSON.stringify(backup), title: 'Save backup' });
+      if (r === 'saved') setSnack('Backup saved');
     } catch (e) {
       setSnack('Backup failed: ' + String((e as any)?.message ?? e));
     } finally {

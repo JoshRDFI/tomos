@@ -32,6 +32,7 @@ import { APP_NAME } from '@/constants/app';
 import { isChatEmpty } from '@/lib/personas';
 import DrawerContent from '@/components/drawer/DrawerContent';
 import WebNotice from '@/components/WebNotice';
+import { exportFileName, exportText } from '@/lib/exportFile';
 
 const EMPTY_STREAM: llama.StreamView = { thinking: '', answer: '', thinkingOpen: false };
 
@@ -679,14 +680,16 @@ export default function ChatScreen() {
           content += `${m.role === 'user' ? 'You' : 'Assistant'}:\n${m.content}\n\n`;
         }
       }
-      const ext = format === 'md' ? '.md' : '.txt';
-      const { Paths, File } = await import('expo-file-system');
-      const file = new File(Paths.cache, `${s.title?.replace(/[^a-zA-Z0-9]/g, '_') ?? 'chat'}${ext}`);
-      await file.write(content);
-      const Sharing = await import('expo-sharing');
-      await Sharing.shareAsync(file.uri);
+      const r = await exportText({
+        name: exportFileName(s.title, format === 'md' ? '.md' : '.txt', 'chat'),
+        mimeType: format === 'md' ? 'text/markdown' : 'text/plain',
+        content,
+        title: 'Export chat',
+      });
+      if (r === 'saved') setSnack('Chat saved');
     } catch (e) {
       console.warn('Export error', e);
+      setSnack('Export failed: ' + String((e as any)?.message ?? e));
     }
   }, [isWeb]);
 

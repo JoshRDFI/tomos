@@ -12,6 +12,7 @@ import { composeSystemMessage } from '@/lib/prompt';
 import { estimateTokens } from '@/lib/personas';
 import { serializePersonaMarkdown } from '@/lib/personaMarkdown';
 import type { PersonaExample } from '@/types';
+import { exportFileName, exportText } from '@/lib/exportFile';
 
 /** Create or edit one persona (route param `id`; none = new). */
 export default function PersonaEditor() {
@@ -106,12 +107,13 @@ export default function PersonaEditor() {
 
   const exportFile = async () => {
     try {
-      const { Paths, File } = await import('expo-file-system');
-      const Sharing = await import('expo-sharing');
-      const file = new File(Paths.cache, `${(name.trim() || 'persona').replace(/[^a-zA-Z0-9 _-]/g, '_')}.md`);
-      if (file.exists) file.delete();
-      file.write(serializePersonaMarkdown({ name: name.trim(), content: content.trim(), greeting: greeting.trim() || null, examples, params }));
-      await Sharing.shareAsync(file.uri, { mimeType: 'text/markdown', dialogTitle: 'Export persona' });
+      const r = await exportText({
+        name: exportFileName(name, '.md', 'persona'),
+        mimeType: 'text/markdown',
+        content: serializePersonaMarkdown({ name: name.trim(), content: content.trim(), greeting: greeting.trim() || null, examples, params }),
+        title: 'Export persona',
+      });
+      if (r === 'saved') setSnack('Saved');
     } catch (e) {
       setSnack('Export failed: ' + String((e as any)?.message ?? e));
     }

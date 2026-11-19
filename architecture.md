@@ -43,6 +43,7 @@ react_native_space/
   contexts/               SettingsContext (theme, default system prompt), ModelContext (load state)
   lib/
     db.ts                 schema, migrations, queries, getEffectiveParams()
+    exportFile.ts         export a chat, persona or backup: save to the phone or share
     sqliteLoader(.web).ts platform split so web export never imports expo-sqlite
     llama.ts              llama.rn wrapper: load/release, generate, stop, tokenize
     params.ts             ParamSet, APP_DEFAULTS, layer resolution, load/completion split, CLI flag parser
@@ -73,6 +74,7 @@ react_native_space/
     highlight.ts          Prism languages/aliases; highlightCode() → flat styled runs
   modules/hf-download/    local Expo module (Kotlin): Android DownloadManager enqueue/query/remove
   modules/generation-service/  local Expo module (Kotlin): foreground service + notifications while generating
+  modules/save-file/           local Expo module (Kotlin): Android's "save as" picker for exports
   constants/theme.ts      tokens, type scale, spacing, radii (no inline hex elsewhere)
   constants/licenses.json generated; see "Licenses"
   constants/app.ts        app name (read from app.json), publisher, code license, repo URL

@@ -14,7 +14,9 @@ The name fits twice. The app is meant to be just the scroll: a plain surface to 
 
 ## Privacy
 
-Everything runs on the phone. There are no accounts, no analytics, no ads and no servers of ours. The app uses the network only when you ask it to download a model from Hugging Face; your chats never leave the device.
+Everything runs on the phone. There are no accounts, no analytics, no ads and no servers of ours. The app itself connects to the internet only when you ask it to download a model from Hugging Face.
+
+Your chats leave the device only if you send them somewhere. Exporting a chat, a persona or a backup asks whether to **save it to the phone** (Android's own save picker; Downloads, Documents or any folder you choose) or **share** it with another app. Sharing hands the file to the app you pick, such as Drive or email, and that app may upload it.
 
 ## Features
 
@@ -34,7 +36,7 @@ Everything runs on the phone. There are no accounts, no analytics, no ads and no
 - **Edit the model's replies** (long-press → Edit reply) to cut a repeated line before it becomes a habit; the original stays as a version. DRY repetition penalty is on by default.
 - **Keeps going with the screen off.** A reply keeps generating when you lock the phone or switch apps, with a notification (and Stop); you're notified when it's ready. On Android 17 and later this needs a model that fits the background memory limit (about 4 GB on a 16 GB phone, so 3–4B models); larger models pause until you open the app.
 - Dark, light and system themes.
-- Backups of chats, personas and settings (model files aren't included).
+- Backups of chats, personas and settings (model files aren't included), saved to the phone or shared.
 - About screen with every open-source license that ships in the app.
 
 ## Get the app
