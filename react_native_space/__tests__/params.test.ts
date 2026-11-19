@@ -1,5 +1,5 @@
 import {
-  thinkingEnabled,
+  thinkingEnabled, LEGACY_DEFAULTS,
   APP_DEFAULTS, extractFileParams, loadSignature, parseCliFlags, parseParamSet,
   parseValue, resolveParams, splitParams,
 } from '@/lib/params';
@@ -137,4 +137,11 @@ describe('thinkingEnabled (the chat-settings Thinking switch)', () => {
   it('on by default', () => expect(thinkingEnabled({}, inherited())).toBe(true));
   it('follows the inherited setting', () => expect(thinkingEnabled({}, inherited(false))).toBe(false));
   it("the chat's own setting wins", () => expect(thinkingEnabled({ enable_thinking: true }, inherited(false))).toBe(true));
+});
+
+describe('default repetition settings', () => {
+  it('DRY is on by default at 0.8', () => expect(resolveParams({}).values.dry_multiplier).toBe(0.8));
+  it("the first version's defaults stay as they were (no DRY)", () => {
+    expect(LEGACY_DEFAULTS).toEqual({ temperature: 0.7, top_p: 0.9, top_k: 40, min_p: 0.05, penalty_repeat: 1.1, n_predict: 1024, n_ctx: 4096, n_threads: 6 });
+  });
 });

@@ -173,3 +173,21 @@ it('a leading greeting is not condensed as a turn; the summary still ends on the
   const condensed = messages.slice(1, -1);
   expect(condensed[condensed.length - 1].content).toBe(`message ${Number(s!.throughMessageId.slice(1))}`);
 });
+
+it('turns off penalties that would punish a summary for repeating the conversation', async () => {
+  (llama.countTokens as jest.Mock).mockResolvedValue(60);
+  (llama.generate as jest.Mock).mockResolvedValue(result());
+  const modelMeta = require('../lib/modelMeta');
+  (modelMeta.prepareModel as jest.Mock).mockResolvedValueOnce({ model, load: {}, completion: { temperature: 0.7, dry_multiplier: 0.8, penalty_present: 1.5, penalty_freq: 0.5 } });
+  await compactIfNeeded('s', model);
+  expect((llama.generate as jest.Mock).mock.calls[0][2]).toMatchObject({ dry_multiplier: 0, penalty_present: 0, penalty_freq: 0 });
+});
+
+it('logs why a summary was not saved', async () => {
+  (llama.countTokens as jest.Mock).mockResolvedValue(60);
+  (llama.generate as jest.Mock).mockResolvedValue(result({ cutOff: true }));
+  const spy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  await compactIfNeeded('s', model);
+  expect(spy).toHaveBeenCalledWith(expect.stringContaining('[gen] compaction: not saved (hit the length limit)'));
+  spy.mockRestore();
+});

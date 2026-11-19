@@ -23,6 +23,9 @@ export const APP_DEFAULTS: ParamSet = {
   top_k: 40,
   min_p: 0.05,
   penalty_repeat: 1.1,
+  // DRY catches a model copying whole sentences from earlier replies, which the
+  // repeat penalty (last 64 tokens only) can't see.
+  dry_multiplier: 0.8,
   n_predict: 1024,
   n_ctx: 4096,
   // Phones mix fast and efficiency cores (Pixel 9 / Tensor G4: 4 fast + 4 slow).
@@ -34,7 +37,9 @@ export const APP_DEFAULTS: ParamSet = {
  * Defaults of the first app version. Its saved settings always held all of
  * these, so values equal to them weren't chosen by the user.
  */
-export const LEGACY_DEFAULTS: ParamSet = { ...APP_DEFAULTS, n_threads: 6 };
+export const LEGACY_DEFAULTS: ParamSet = {
+  temperature: 0.7, top_p: 0.9, top_k: 40, min_p: 0.05, penalty_repeat: 1.1, n_predict: 1024, n_ctx: 4096, n_threads: 6,
+};
 
 /** Keys used by the app's first version, mapped to llama.rn names. */
 const LEGACY_KEYS: Record<string, string> = {

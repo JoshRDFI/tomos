@@ -56,6 +56,10 @@ export async function compactIfNeeded(
         ...completion,
         enable_thinking: false,
         ...(kwargs && typeof kwargs === 'object' ? { chat_template_kwargs: { ...(kwargs as object), enable_thinking: false } } : {}),
+        // A summary must repeat the conversation's names and phrases: no penalties for that.
+        dry_multiplier: 0,
+        penalty_present: 0,
+        penalty_freq: 0,
         n_predict: SUMMARY_N_PREDICT,
         temperature: Math.min(Number.isFinite(temp) ? temp : 0.8, SUMMARY_MAX_TEMP),
       },
@@ -70,10 +74,13 @@ export async function compactIfNeeded(
   // Only a complete summary of every condensed message is worth keeping: not
   // one that was stopped, hit the length limit, ran on a model swapped in
   // meanwhile, or had messages dropped to fit.
-  if (result.stopped || cancel.stop || result.cutOff || result.droppedMessages > 0) return null;
-  if (llama.getLoadedModelId() !== model.id) return null;
+  const notSaved = (why: string) => { console.log(`[gen] compaction: not saved (${why})`); return null; };
+  if (result.stopped || cancel.stop) return notSaved('stopped');
+  if (result.cutOff) return notSaved('hit the length limit');
+  if (result.droppedMessages > 0) return notSaved(`${result.droppedMessages} messages didn't fit`);
+  if (llama.getLoadedModelId() !== model.id) return notSaved('model changed');
   const text = splitThinking(result.content).answer.trim();
-  if (!text) return null;
+  if (!text) return notSaved('empty');
 
   const summary: Summary = {
     id: db.generateId(),
