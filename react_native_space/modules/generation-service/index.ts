@@ -4,6 +4,7 @@ interface GenerationServiceNative {
   start(o: { title: string; text: string }): boolean;
   stop(): void;
   notifyDone(o: { title: string; body: string; subtitle: string | null; sessionId: string }): void;
+  memoryState(): { current: number; high: number | null } | null;
   cpuMaxFrequencies(): number[];
   isIgnoringBatteryOptimizations(): boolean;
   requestIgnoreBatteryOptimizations(): boolean;

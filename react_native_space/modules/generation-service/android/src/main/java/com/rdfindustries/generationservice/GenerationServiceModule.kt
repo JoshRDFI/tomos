@@ -70,6 +70,22 @@ class GenerationServiceModule : Module() {
       cpus.mapNotNull { runCatching { File(it, "cpufreq/cpuinfo_max_freq").readText().trim().toLong() }.getOrNull() }
     }
 
+    // The app's memory use and the limit Android 17's Memory Limiter sets on
+    // it (cgroup v2, on the cgroup that holds all of the app's processes).
+    // high is null when there's no limit; null overall when unreadable.
+    Function("memoryState") {
+      try {
+        val path = File("/proc/self/cgroup").readLines().firstOrNull { it.startsWith("0::") }?.removePrefix("0::")
+          ?: return@Function null
+        val app = File("/sys/fs/cgroup$path").parentFile ?: return@Function null
+        val current = File(app, "memory.current").readText().trim().toLong()
+        val high = File(app, "memory.high").readText().trim().let { if (it == "max") null else it.toLong() }
+        mapOf("current" to current.toDouble(), "high" to high?.toDouble())
+      } catch (e: Exception) {
+        null
+      }
+    }
+
     Function("isIgnoringBatteryOptimizations") {
       val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
       pm.isIgnoringBatteryOptimizations(context.packageName)

@@ -65,6 +65,8 @@ export default function ChatScreen() {
   // Set to stop the running compaction, even before its request has started.
   const compactionCancel = useRef<{ stop: boolean }>({ stop: false });
   const [continueHint, setContinueHint] = useState<string | null>(null);
+  // Set when a reply or summary was squeezed by the background memory limit.
+  const [reloadOffer, setReloadOffer] = useState(false);
   const [carriedDialog, setCarriedDialog] = useState(false);
   const [models, setModels] = useState<ModelRecord[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -256,6 +258,7 @@ export default function ChatScreen() {
       .catch((e) => console.warn('Compaction error', e))
       .finally(() => {
         endSummaryWork?.();
+        if (backgroundWork.takeSqueezed()) setReloadOffer(true);
         compactionRef.current = null;
         setCompacting(false);
       });
@@ -471,8 +474,20 @@ export default function ChatScreen() {
       await generateReply(sessionId, loadedModel, parentId, cont);
     } finally {
       end();
+      if (backgroundWork.takeSqueezed()) setReloadOffer(true);
     }
   }, [generateReply]);
+
+  // After the background memory limit pushed the model into swap, every token
+  // waits on it coming back; loading it again from the file is faster.
+  const reloadModel = useCallback(async () => {
+    setReloadOffer(false);
+    const model = modelCtx.loadedModel;
+    if (!session || !model || generatingRef.current) return;
+    await stopCompaction();
+    const prepared = await prepareModel(model, await db.getSession(session.id));
+    await modelCtx.loadModel(prepared.model, prepared.load);
+  }, [session, modelCtx, stopCompaction]);
 
   // Android 13+: "Reply ready" needs permission. Asked once, on the first send.
   const askNotificationsOnce = useCallback(async () => {
@@ -994,6 +1009,15 @@ export default function ChatScreen() {
       </Portal>
 
       <Snackbar visible={!!snack} onDismiss={() => setSnack('')} duration={2000}>{snack}</Snackbar>
+      <Snackbar
+        visible={reloadOffer && !isStreaming}
+        onDismiss={() => setReloadOffer(false)}
+        onIconPress={() => setReloadOffer(false)}
+        duration={Number.POSITIVE_INFINITY}
+        action={{ label: 'Reload', onPress: reloadModel }}
+      >
+        Android limited memory while the app was in the background, so the model is slow until it's reloaded. Reload it now?
+      </Snackbar>
       <Snackbar
         visible={!!continueHint && continueHint === session?.id}
         onDismiss={() => setContinueHint(null)}

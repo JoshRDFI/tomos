@@ -1,7 +1,7 @@
 // Keeps a reply or summary running with the screen off. Android freezes a
 // backgrounded app unless it runs a foreground service, so the service is on
 // while any generation is; modules/generation-service is the native side.
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { splitThinking } from './thinking';
 
 export interface BackgroundNative {
@@ -9,7 +9,25 @@ export interface BackgroundNative {
   start(o: { title: string; text: string }): boolean;
   stop(): void;
   notifyDone(o: { title: string; body: string; subtitle: string | null; sessionId: string }): void;
+  /** The app's memory use and Android's limit for it, in bytes; high is null when there's no limit. */
+  memoryState?(): MemoryState | null;
 }
+
+export interface MemoryState {
+  current: number;
+  high: number | null;
+}
+
+/**
+ * Android 17 limits an app's memory while it isn't on screen (4 GB on a 16 GB
+ * phone), foreground service or not. A model bigger than that is squeezed into
+ * swap and generation all but stops until the app is back on screen.
+ */
+export function overMemoryLimit(m: MemoryState | null): boolean {
+  return !!m && m.high != null && m.current >= 0.9 * m.high;
+}
+
+export const PAUSED_TEXT = 'Paused: this model needs more memory than Android allows in the background. Open Tomos to continue.';
 
 export type WorkKind = 'reply' | 'summary';
 
@@ -25,9 +43,16 @@ const TEXT: Record<WorkKind, string> = {
  * it again. Native failures are logged, never thrown: without the service,
  * generation still works in the foreground.
  */
-export function createBackgroundWork(getNative: () => BackgroundNative | null, opts: { stopDelayMs: number }) {
+export function createBackgroundWork(
+  getNative: () => BackgroundNative | null,
+  opts: { stopDelayMs: number; pollMs?: number; isBackground?: () => boolean },
+) {
   let active = 0;
   let stopTimer: ReturnType<typeof setTimeout> | null = null;
+  let kind: WorkKind = 'reply';
+  let paused = false;
+  let squeezed = false;
+  let poll: ReturnType<typeof setInterval> | null = null;
 
   const call = (what: string, f: (n: BackgroundNative) => void) => {
     try {
@@ -38,22 +63,46 @@ export function createBackgroundWork(getNative: () => BackgroundNative | null, o
     }
   };
 
+  const show = (text: string) =>
+    call('start', (n) => { if (!n.start({ title: 'Tomos', text })) console.warn('[bg] service not started'); });
+
+  // While work runs, watch for the background memory limit: say so in the
+  // notification, and put the normal text back once the app is on screen.
+  const check = () => {
+    const background = opts.isBackground?.() ?? false;
+    let over = false;
+    if (background) call('memory', (n) => { over = overMemoryLimit(n.memoryState?.() ?? null); });
+    if (over && !paused) { paused = true; squeezed = true; show(PAUSED_TEXT); }
+    else if (!background && paused) { paused = false; show(TEXT[kind]); }
+  };
+
   return {
-    begin(kind: WorkKind): () => void {
+    begin(next: WorkKind): () => void {
       if (stopTimer) { clearTimeout(stopTimer); stopTimer = null; }
       active++;
-      call('start', (n) => { if (!n.start({ title: 'Tomos', text: TEXT[kind] })) console.warn('[bg] service not started'); });
+      kind = next;
+      paused = false;
+      show(TEXT[kind]);
+      if (!poll && opts.pollMs) poll = setInterval(check, opts.pollMs);
       let ended = false;
       return () => {
         if (ended) return;
         ended = true;
         active--;
         if (active > 0) return;
+        if (poll) { clearInterval(poll); poll = null; }
+        paused = false;
         stopTimer = setTimeout(() => {
           stopTimer = null;
           if (active === 0) call('stop', (n) => n.stop());
         }, opts.stopDelayMs);
       };
+    },
+    /** Whether work was squeezed by the memory limit since the last call. */
+    takeSqueezed(): boolean {
+      const was = squeezed;
+      squeezed = false;
+      return was;
     },
     notifyDone(o: { title: string; body: string; subtitle?: string | null; sessionId: string }) {
       call('notify', (n) => n.notifyDone({ ...o, subtitle: o.subtitle ?? null }));
@@ -77,7 +126,11 @@ function nativeModule(): BackgroundNative | null {
   return require('../modules/generation-service').default as BackgroundNative;
 }
 
-export const backgroundWork = createBackgroundWork(nativeModule, { stopDelayMs: 5000 });
+export const backgroundWork = createBackgroundWork(nativeModule, {
+  stopDelayMs: 5000,
+  pollMs: 5000,
+  isBackground: () => AppState.currentState !== 'active',
+});
 
 /** The ongoing notification's Stop button. Returns the unsubscribe. */
 export function onStopRequest(listener: () => void): () => void {

@@ -32,7 +32,7 @@ Everything runs on the phone. There are no accounts, no analytics, no ads and no
 - Chat templates: auto (from the file), ChatML, Llama 3, Gemma, Mistral, Phi, Zephyr, Vicuna, Alpaca, raw.
 - **Long chats keep their thread.** When a chat fills the context window, the model condenses older messages into a summary it keeps reading (you can view it; every message stays saved). **Continue in a new chat** carries the summary and your last exchange into a fresh chat with a link back.
 - **Edit the model's replies** (long-press → Edit reply) to cut a repeated line before it becomes a habit; the original stays as a version. DRY repetition penalty is on by default.
-- **Keeps going with the screen off.** A reply keeps generating when you lock the phone or switch apps, with a notification (and Stop); you're notified when it's ready.
+- **Keeps going with the screen off.** A reply keeps generating when you lock the phone or switch apps, with a notification (and Stop); you're notified when it's ready. On Android 17 and later this needs a model that fits the background memory limit (about 4 GB on a 16 GB phone, so 3–4B models); larger models pause until you open the app.
 - Dark, light and system themes.
 - Backups of chats, personas and settings (model files aren't included).
 - About screen with every open-source license that ships in the app.
@@ -44,7 +44,7 @@ There are no published builds yet. To use it now, build it yourself (below).
 ## Requirements
 
 - A 64-bit (arm64) Android phone, Android 7 or newer. Developed and tested on a Pixel 9 Pro XL (16 GB RAM); other phones should work but haven't been tested.
-- Memory decides model size: 8 GB of RAM runs 3–4B models, 12 GB or more runs 7–8B. Q4_K_M is the sweet spot.
+- Memory decides model size: 8 GB of RAM runs 3–4B models, 12 GB or more runs 7–8B. Q4_K_M is the sweet spot. To keep generating with the screen off or in another app on Android 17+, the model must fit about a quarter of the phone's RAM.
 - Samsung, Xiaomi, OnePlus and some other phones stop background apps to save battery; the app asks once to be allowed to run in the background so replies finish with the screen off.
 - To build: Node 20+, corepack (yarn 4), JDK 17+, the Android SDK (platform 35/36). No NDK setup for llama.cpp is needed; llama.rn ships prebuilt libraries.
 
