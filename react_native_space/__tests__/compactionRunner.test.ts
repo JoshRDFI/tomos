@@ -94,14 +94,21 @@ describe('prepareContinuation', () => {
     expect(text).toBe('Earlier we planned a trip.\n\n' + [4, 5, 6, 7, 8, 9, 10, 11].map((i) => `${i % 2 === 0 ? 'User' : 'Assistant'}: message ${i}`).join('\n'));
   });
 
-  it('runs compaction first with the 40% trigger when the chat is long', async () => {
-    // 12 × 48 + 48 = 624: under the 70% trigger, over 40%.
+  it('condenses everything but the last exchange when the chat is over 20%', async () => {
+    // 12 × 48 + 40 = 616: under the 70% trigger, over 20%.
     (llama.countTokens as jest.Mock).mockResolvedValue(40);
     (llama.generate as jest.Mock).mockResolvedValue(result({ content: 'Fresh summary.' }));
     const text = await prepareContinuation('s', model);
     expect(llama.generate).toHaveBeenCalledTimes(1);
-    expect(db.insertSummary).toHaveBeenCalled();
-    expect(text.startsWith('Fresh summary.')).toBe(true);
+    expect((db.insertSummary as jest.Mock).mock.calls[0][0].throughMessageId).toBe('m9');
+    expect(text).toBe('Fresh summary.\n\nUser: message 10\nAssistant: message 11');
+  });
+
+  it('carries at most 20% of the space', async () => {
+    // No model: the default 8192 context, budget 7152 → 1430 tokens. Each message ≈ 500.
+    (db.getSessionMessages as jest.Mock).mockResolvedValue(Array.from({ length: 12 }, (_, i) => ({ ...msg(i), content: 'x'.repeat(2000) })));
+    const text = await prepareContinuation('s', null);
+    expect(text.split('\n').filter((l) => /^(User|Assistant): /.test(l))).toHaveLength(2);
   });
 
   it('works without a loaded model (no compaction)', async () => {

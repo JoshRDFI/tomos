@@ -12,7 +12,7 @@ import type { SessionRecord, Persona } from '@/types';
 import ParamEditor from '@/components/params/ParamEditor';
 import { importPersonaFromFile } from '@/lib/personaImport';
 import { ensureFileParams } from '@/lib/modelMeta';
-import { parseParamSet, resolveParams, serializeParamSet, thinkingEnabled, type ParamSet, type ResolvedParams } from '@/lib/params';
+import { appDefaultsFor, parseParamSet, resolveParams, serializeParamSet, thinkingEnabled, type ParamSet, type ResolvedParams } from '@/lib/params';
 
 export default function ChatSettingsScreen() {
   const theme = useTheme<AppTheme>();
@@ -24,7 +24,7 @@ export default function ChatSettingsScreen() {
 
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [choice, setChoice] = useState<db.PersonaChoice>({ kind: 'none' });
-  const [baseLayers, setBaseLayers] = useState<{ global: ParamSet; file: ParamSet; model: ParamSet }>({ global: {}, file: {}, model: {} });
+  const [baseLayers, setBaseLayers] = useState<{ app?: ParamSet; global: ParamSet; file: ParamSet; model: ParamSet }>({ global: {}, file: {}, model: {} });
   const [promptText, setPromptText] = useState('');
   const [overrides, setOverrides] = useState<ParamSet>({});
   const [inherited, setInherited] = useState<ResolvedParams>(() => resolveParams({}));
@@ -50,7 +50,7 @@ export default function ChatSettingsScreen() {
       let model = modelId ? await db.getModel(modelId) : null;
       if (model) model = await ensureFileParams(model);
       setModelName(model?.displayName ?? null);
-      const layers = { global: await db.getGlobalParams(), file: parseParamSet(model?.fileParams), model: parseParamSet(model?.paramsOverride) };
+      const layers = { app: appDefaultsFor(model?.trainedContext), global: await db.getGlobalParams(), file: parseParamSet(model?.fileParams), model: parseParamSet(model?.paramsOverride) };
       setBaseLayers(layers);
       const p = await db.getAllPersonas();
       setPresets(p);
@@ -201,7 +201,7 @@ export default function ChatSettingsScreen() {
           Continue in a new chat
         </Button>
         <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13 }}>
-          Starts a new chat with a summary of this one and its latest messages, the same persona and settings, and a link back.
+          Starts a new chat with a summary of this one and your last exchange, the same persona and settings, and a link back.
         </Text>
 
         {/* llama.cpp settings */}

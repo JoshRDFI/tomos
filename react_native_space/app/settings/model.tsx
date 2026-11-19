@@ -10,7 +10,7 @@ import { ensureFileParams } from '@/lib/modelMeta';
 import { CATALOG_BY_KEY } from '@/lib/paramCatalog';
 import ParamEditor from '@/components/params/ParamEditor';
 import {
-  formatValue, parseParamSet, resolveParams, serializeParamSet,
+  formatValue, parseParamSet, resolveParams, appDefaultsFor, serializeParamSet,
   type ParamSet, type ResolvedParams,
 } from '@/lib/params';
 
@@ -35,7 +35,7 @@ export default function ModelSettingsScreen() {
       const file = parseParamSet(m?.fileParams);
       setFileParams(file);
       setOverrides(parseParamSet(m?.paramsOverride));
-      setInherited(resolveParams({ global: await db.getGlobalParams(), file }));
+      setInherited(resolveParams({ app: appDefaultsFor(m?.trainedContext), global: await db.getGlobalParams(), file }));
       setLoading(false);
     })().catch(() => setLoading(false));
   }, [isWeb, modelId]);

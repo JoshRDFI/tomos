@@ -54,7 +54,7 @@ const sections = [
   {
     title: 'Long chats',
     icon: 'text-box-multiple-outline',
-    body: `A model can only read so much at once (its context window). When a chat gets close to that, the app asks the model to condense the oldest messages into a short summary, right after a reply. You'll see "Condensing earlier messages…" for a minute or so; you can keep typing, and sending a message stops it.\n\nA divider marks where the summary starts; tap it to read the summary. Every message stays saved and visible: only what the model reads changes. If you edit a message that was condensed, the summary no longer applies to that version.\n\nTo start fresh but keep the thread, use Chat settings → Continue in a new chat. The new chat starts with the summary and the latest messages, the same persona and settings, and a link back to the old chat.`,
+    body: `A model can only read so much at once (its context window). When a chat gets close to that, the app asks the model to condense the oldest messages into a short summary, right after a reply. You'll see "Condensing earlier messages…" for a minute or so; you can keep typing, and sending a message stops it.\n\nA divider marks where the summary starts; tap it to read the summary. Every message stays saved and visible: only what the model reads changes. If you edit a message that was condensed, the summary no longer applies to that version.\n\nTo start fresh but keep the thread, use Chat settings → Continue in a new chat. The new chat starts with the summary and your last exchange, the same persona and settings, and a link back to the old chat.`,
   },
   {
     title: 'Versions, continuing and backups',
@@ -64,7 +64,7 @@ const sections = [
   {
     title: 'Performance tips',
     icon: 'speedometer',
-    body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Keep context length at 4096 unless you need longer conversations.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
+    body: `• Threads: use the number of fast cores (4 on a Pixel 9). More threads can be slower, because work spills onto the efficiency cores.\n• Context length is 8192 by default (less if the model was trained for less). Lower it to 4096 if a model loads slowly or the app runs out of memory; raise it for fewer summaries in long chats.\n• The first load of a model takes longer than subsequent loads.\n• Smaller quantizations (Q4_K_M) run faster than larger ones (Q5_K_M, Q6_K).`,
   },
 ];
 

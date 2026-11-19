@@ -6,9 +6,10 @@ import { prepareModel } from './modelMeta';
 import { toChatMessages } from './prompt';
 import { splitThinking } from './thinking';
 import {
-  activeSummary, buildCarryOver, promptPath, COMPACT_TARGET, planCompaction, summaryRequest, SUMMARY_MAX_TEMP, SUMMARY_N_PREDICT,
+  activeSummary, buildCarryOver, promptPath, CARRY_OVER_SHARE, planCompaction, summaryRequest, SUMMARY_MAX_TEMP, SUMMARY_N_PREDICT,
 } from './compaction';
 import { estimateTokens } from './personas';
+import { DEFAULT_N_CTX } from './params';
 import type { ModelRecord, Summary } from '@/types';
 
 /**
@@ -19,7 +20,7 @@ import type { ModelRecord, Summary } from '@/types';
 export async function compactIfNeeded(
   sessionId: string,
   model: ModelRecord,
-  opts?: { onStart?: () => void; trigger?: number; cancel?: { stop: boolean } },
+  opts?: { onStart?: () => void; trigger?: number; target?: number; keepMin?: number; cancel?: { stop: boolean } },
 ): Promise<Summary | null> {
   const cancel = opts?.cancel ?? { stop: false };
   const session = await db.getSession(sessionId);
@@ -40,6 +41,8 @@ export async function compactIfNeeded(
     roles: chat.map((m) => (m.role === 'user' ? 'user' : 'assistant')),
     budget: llama.promptBudget(completion),
     trigger: opts?.trigger,
+    target: opts?.target,
+    keepMin: opts?.keepMin,
   });
   if (!plan || cancel.stop) return null;
 
@@ -96,20 +99,20 @@ export async function compactIfNeeded(
 }
 
 /** Budget used for carry-over when no model is loaded (the app's default context). */
-const FALLBACK_BUDGET = 4096 - 2048 - 16;
+const FALLBACK_BUDGET = DEFAULT_N_CTX - 1024 - 16;
 
 /**
  * What "Continue in a new chat" carries over: the chat's summary and the
- * messages after it, word for word. A long tail is condensed first (40%
- * trigger) when a model is loaded; anything still too long loses its oldest
- * messages.
+ * messages after it, word for word, in at most 20% of the space so the new
+ * chat has room. With a model loaded, everything but the last exchange is
+ * condensed first; anything still too long loses its oldest messages.
  */
 export async function prepareContinuation(
   sessionId: string,
   model: ModelRecord | null,
   opts?: { onStart?: () => void; cancel?: { stop: boolean } },
 ): Promise<string> {
-  const fresh = model ? await compactIfNeeded(sessionId, model, { onStart: opts?.onStart, trigger: COMPACT_TARGET, cancel: opts?.cancel }) : null;
+  const fresh = model ? await compactIfNeeded(sessionId, model, { onStart: opts?.onStart, trigger: CARRY_OVER_SHARE, target: CARRY_OVER_SHARE, keepMin: 2, cancel: opts?.cancel }) : null;
   const path = await db.getSessionMessages(sessionId);
   const summary = fresh ?? activeSummary(await db.getSummaries(sessionId), path);
   let budget = FALLBACK_BUDGET;
@@ -117,5 +120,5 @@ export async function prepareContinuation(
     const session = await db.getSession(sessionId);
     budget = llama.promptBudget((await prepareModel(model, session)).completion);
   }
-  return buildCarryOver(summary?.content ?? null, toChatMessages(promptPath(path, summary ? [summary] : [])), COMPACT_TARGET * budget, estimateTokens);
+  return buildCarryOver(summary?.content ?? null, toChatMessages(promptPath(path, summary ? [summary] : [])), CARRY_OVER_SHARE * budget, estimateTokens);
 }

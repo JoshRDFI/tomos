@@ -9,6 +9,8 @@ export const COMPACT_TRIGGER = 0.7;
 export const COMPACT_TARGET = 0.4;
 /** Always keep at least the last two exchanges word for word. */
 export const KEEP_MIN = 4;
+/** A continued chat starts with at most this share: the summary and the last exchange. */
+export const CARRY_OVER_SHARE = 0.2;
 export const SUMMARY_N_PREDICT = 400;
 export const SUMMARY_MAX_TEMP = 0.5;
 /** Suggest "Continue in a new chat" after this many summaries on a path. */
@@ -57,6 +59,8 @@ export function planCompaction(o: {
   roles: ('user' | 'assistant')[];
   budget: number;
   trigger?: number;
+  target?: number;
+  keepMin?: number;
 }): { throughIndex: number } | null {
   const n = o.counts.length;
   const cost = (i: number) => o.counts[i]! + PER_MESSAGE_OVERHEAD;
@@ -66,11 +70,12 @@ export function planCompaction(o: {
 
   // First kept message.
   let k = 0;
-  while (n - k > KEEP_MIN && total > COMPACT_TARGET * o.budget) total -= cost(k++);
+  const keepMin = o.keepMin ?? KEEP_MIN;
+  while (n - k > keepMin && total > (o.target ?? COMPACT_TARGET) * o.budget) total -= cost(k++);
   if (o.roles[k] !== 'user') {
     let fwd = k;
     while (fwd < n && o.roles[fwd] !== 'user') fwd++;
-    if (fwd < n && n - fwd >= KEEP_MIN) k = fwd;
+    if (fwd < n && n - fwd >= keepMin) k = fwd;
     else {
       while (k > 0 && o.roles[k] !== 'user') k--;
     }

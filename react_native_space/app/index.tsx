@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions, BackHandler, KeyboardAvoidingView, Pressable, AppState, ScrollView, Keyboard } from 'react-native';
 import * as downloader from '@/lib/downloader';
 import { syncDownloads } from '@/lib/downloads';
 import { Text, IconButton, Menu, useTheme, Snackbar, Portal, Dialog, Button, TextInput as PaperInput, ActivityIndicator, Divider } from 'react-native-paper';
@@ -36,7 +36,14 @@ export default function ChatScreen() {
   const theme = useTheme<AppTheme>();
   const c = theme.appColors;
   const insets = useSafeAreaInsets();
-  const { width: screenWidth } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  // Dialogs don't move for the keyboard on their own (edge-to-edge Android).
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) => setKeyboardHeight(e.endCoordinates.height));
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKeyboardHeight(0));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
   const router = useRouter();
   const { continueFrom } = useLocalSearchParams<{ continueFrom?: string }>();
   const modelCtx = useModelContext();
@@ -70,6 +77,7 @@ export default function ChatScreen() {
   const [renameText, setRenameText] = useState('');
   const [longPressMsg, setLongPressMsg] = useState<MessageRecord | null>(null);
   const [replyEdit, setReplyEdit] = useState<{ msg: MessageRecord; text: string } | null>(null);
+  const replyInputRef = useRef<any>(null);
 
   // refs removed - DrawerLayout and FlashList v2 don't support them in this way
   const isWeb = Platform.OS === 'web';
@@ -882,22 +890,24 @@ export default function ChatScreen() {
           </Dialog.Actions>
         </Dialog>
 
-        <Dialog visible={!!replyEdit} onDismiss={() => setReplyEdit(null)}>
+        {/* Sits above the keyboard; the box scrolls itself to keep the cursor in view. Opens with the cursor at the end. */}
+        <Dialog visible={!!replyEdit} onDismiss={() => setReplyEdit(null)} style={{ marginBottom: keyboardHeight }}>
           <Dialog.Title>Edit reply</Dialog.Title>
-          <Dialog.ScrollArea style={{ maxHeight: 420, paddingHorizontal: 16 }}>
-            <ScrollView keyboardShouldPersistTaps="handled">
-              <PaperInput
-                value={replyEdit?.text ?? ''}
-                onChangeText={(t) => setReplyEdit((r) => (r ? { ...r, text: t } : r))}
-                mode="outlined"
-                multiline
-                style={{ backgroundColor: c.surfaceRaised, marginVertical: 8 }}
-              />
-              <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 13, marginBottom: 8 }}>
-                Saved as a new version; the original stays under ‹ ›. Replies after this one stay with the original.
-              </Text>
-            </ScrollView>
-          </Dialog.ScrollArea>
+          <Dialog.Content>
+            <PaperInput
+              ref={replyInputRef}
+              value={replyEdit?.text ?? ''}
+              onChangeText={(t) => setReplyEdit((r) => (r ? { ...r, text: t } : r))}
+              mode="outlined"
+              multiline
+              autoFocus
+              onFocus={() => { const n = replyEdit?.text.length ?? 0; setTimeout(() => replyInputRef.current?.setSelection(n, n), 50); }}
+              style={{ backgroundColor: c.surfaceRaised, height: Math.max(120, Math.min(480, screenHeight - keyboardHeight - insets.top - 230)) }}
+            />
+            <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.inter, fontSize: 12, marginTop: 6 }}>
+              Saved as a new version; the original stays under ‹ ›.
+            </Text>
+          </Dialog.Content>
           <Dialog.Actions>
             <Button onPress={() => setReplyEdit(null)}>Cancel</Button>
             <Button onPress={saveReplyEdit} disabled={!replyEdit?.text.trim()}>Save</Button>

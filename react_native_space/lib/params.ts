@@ -17,6 +17,9 @@ export const SOURCE_LABELS: Record<ParamSource, string> = {
 };
 
 /** The app's own starting values (the bottom layer). */
+/** Default context length, when the model was trained for at least this much. */
+export const DEFAULT_N_CTX = 8192;
+
 export const APP_DEFAULTS: ParamSet = {
   temperature: 0.7,
   top_p: 0.9,
@@ -30,7 +33,7 @@ export const APP_DEFAULTS: ParamSet = {
   // llama.cpp's 64 is a few sentences, too short to see the previous reply.
   penalty_last_n: 512,
   n_predict: 1024,
-  n_ctx: 4096,
+  n_ctx: DEFAULT_N_CTX,
   // Phones mix fast and efficiency cores (Pixel 9 / Tensor G4: 4 fast + 4 slow).
   // More threads than fast cores usually slows generation down.
   n_threads: 4,
@@ -88,6 +91,11 @@ export interface LayeredParams {
 export interface ResolvedParams {
   values: ParamSet;
   sources: Record<string, ParamSource>;
+}
+
+/** App defaults for a model: the default context, capped at what it was trained for. */
+export function appDefaultsFor(trainedContext: number | null | undefined): ParamSet {
+  return trainedContext && trainedContext < DEFAULT_N_CTX ? { ...APP_DEFAULTS, n_ctx: trainedContext } : APP_DEFAULTS;
 }
 
 const LAYER_ORDER: ParamSource[] = ['app', 'global', 'file', 'model', 'persona', 'chat'];

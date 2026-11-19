@@ -161,7 +161,7 @@ The chat prompt sends only the messages after the active summary (`promptPath`);
 
 Sending, regenerating, continuing, switching chat or model all `await stopCompaction()` first (`stopGeneration()`, wait, nothing saved). The input stays usable during compaction.
 
-**Continue in a new chat** (chat settings, or the hint after the 3rd summary on a path): `prepareContinuation()` condenses first with a 40% trigger when a model is loaded, then `buildCarryOver(summary, messages after it)` (oldest dropped first to fit 40% of the budget). `db.createContinuation()` copies model, persona or custom text, and settings; no greeting.
+**Continue in a new chat** (chat settings, or the hint after the 3rd summary on a path): `prepareContinuation()` condenses first when a model is loaded (trigger and target `CARRY_OVER_SHARE` = 20%, keeping only the last exchange), then `buildCarryOver(summary, messages after it)` (oldest dropped first to fit 20% of the budget). `db.createContinuation()` copies model, persona or custom text, and settings; no greeting.
 
 `stopGeneration()` calls `stopCompletion()` immediately. `releaseModel()` stops and awaits any in-flight completion before releasing the context, so a model switch or unload never frees memory under a running completion.
 

@@ -62,6 +62,12 @@ describe('planCompaction', () => {
     expect(planCompaction(base)).toBeNull();
     expect(planCompaction({ ...base, trigger: 0.4 })).not.toBeNull();
   });
+  it('target and keepMin overrides: condense down to 20%, keeping only the last exchange', () => {
+    // 100 + 8 × 58 = 564. Target 200 → drop 7 (158), back to a user turn → keep the last 2.
+    const base = { fixedTokens: 100, counts: Array(8).fill(50), roles: alt(8), budget: 1000, trigger: 0.2 };
+    expect(planCompaction({ ...base, target: 0.2, keepMin: 2 })).toEqual({ throughIndex: 5 });
+    expect(planCompaction({ ...base, target: 0.2 })).toEqual({ throughIndex: 3 }); // default keeps 4
+  });
 });
 
 it('summaryRequest ends with the instruction', () => {

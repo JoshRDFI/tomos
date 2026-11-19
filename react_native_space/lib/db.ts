@@ -3,7 +3,7 @@ import type { DownloadRecord, ModelRecord, SessionRecord, MessageRecord, Persona
 import { activeSummary } from './compaction';
 import { completionParamsOnly, isChatEmpty, linkExactCopies, pickDefaultPersona, resolveInstructions } from './personas';
 import { composeSystemMessage } from './prompt';
-import { LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
+import { appDefaultsFor, LEGACY_DEFAULTS, parseParamSet, resolveParams, serializeParamSet, type ParamSet, type ResolvedParams } from './params';
 import { openDatabaseAsync } from './sqliteLoader';
 import { buildFtsQuery } from './fts';
 import { linearLinks, pathTo, versionsOf, visiblePath } from './branches';
@@ -253,6 +253,7 @@ export async function setGlobalParams(set: ParamSet): Promise<void> {
 export async function getEffectiveParams(session: SessionRecord | null, model: ModelRecord | null): Promise<ResolvedParams> {
   const source = resolveInstructions(session, session?.personaId ? await getAllPersonas() : [], '');
   return resolveParams({
+    app: appDefaultsFor(model?.trainedContext),
     global: await getGlobalParams(),
     file: parseParamSet(model?.fileParams),
     model: parseParamSet(model?.paramsOverride),
