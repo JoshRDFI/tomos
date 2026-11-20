@@ -22,6 +22,7 @@ Your chats leave the device only if you send them somewhere. Exporting a chat, a
 
 - **Any GGUF model.** Import a `.gguf` file; the app copies it into its own storage and reads its metadata, chat template and recommended settings.
   - The import is a copy, not a move. After importing, the app offers to delete the original (for example from Downloads) to free the space; the app doesn't need it.
+  - Rename a model (for example "Chat" or "Coding") to tell your models apart; its card still shows the file name.
 - **Download from Hugging Face.** Paste a model link (from a post or the model page) and pick a file. Android's download manager fetches it in the background, Wi-Fi only by default. Links to an original model list its GGUF versions; split models download as one. This is the app's only network use, and only when you ask for it. Gated models (Hugging Face login) aren't supported yet.
 - **Full llama.cpp settings.** Sampling, repetition penalties, thinking, context length, threads, GPU layers, KV cache type, and any other llama.rn option, set at four levels:
   - all chats
