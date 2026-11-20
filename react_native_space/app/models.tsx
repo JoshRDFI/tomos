@@ -338,7 +338,8 @@ export default function ModelsScreen() {
     await db.updateModel(renameDialog.id, { displayName: renameText.trim() });
     setRenameDialog(null);
     refresh();
-  }, [renameDialog, renameText, refresh]);
+    modelCtx.refreshLoadedModel().catch(() => {});
+  }, [renameDialog, renameText, refresh, modelCtx]);
 
   const totalSize = models.reduce((sum, m) => sum + (m.fileSizeBytes ?? 0), 0);
 

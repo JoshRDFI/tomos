@@ -15,6 +15,8 @@ interface ModelCtx {
   /** Resolves true if the model is loaded and ready afterwards. */
   loadModel: (model: ModelRecord, loadParams: ParamSet) => Promise<boolean>;
   unload: () => Promise<void>;
+  /** Re-read the loaded model's record, after it was renamed or edited elsewhere. */
+  refreshLoadedModel: () => Promise<void>;
   setGenerating: (v: boolean) => void;
 }
 
@@ -27,6 +29,7 @@ const Ctx = createContext<ModelCtx>({
   isGenerating: false,
   loadModel: async () => false,
   unload: async () => {},
+  refreshLoadedModel: async () => {},
   setGenerating: () => {},
 });
 
@@ -94,8 +97,18 @@ export function ModelProvider({ children }: { children: ReactNode }) {
     setErrorDetails(null);
   }, []);
 
+  const loadedIdRef = useRef<string | null>(null);
+  loadedIdRef.current = loadedModelId;
+  const refreshLoadedModel = useCallback(async () => {
+    const id = loadedIdRef.current;
+    if (!id) return;
+    const fresh = await db.getModel(id);
+    // Skip if a different model was loaded while reading.
+    if (fresh && loadedIdRef.current === id) setLoadedModel(fresh);
+  }, []);
+
   return (
-    <Ctx.Provider value={{ loadedModelId, loadedModel, status, error, errorDetails, isGenerating, loadModel: doLoad, unload, setGenerating }}>
+    <Ctx.Provider value={{ loadedModelId, loadedModel, status, error, errorDetails, isGenerating, loadModel: doLoad, unload, refreshLoadedModel, setGenerating }}>
       {children}
     </Ctx.Provider>
   );

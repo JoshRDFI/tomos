@@ -210,9 +210,11 @@ export default function ChatScreen() {
           if (target.id !== currentId) setEditMode(null);
         }
         refreshSessions();
+        // The loaded model may have been renamed (or restored from a backup) elsewhere.
+        modelCtx.refreshLoadedModel().catch(() => {});
       })().catch((e) => console.warn('Focus refresh error', e));
       return () => { cancelled = true; };
-    }, [isWeb, refreshSessions, modelCtx.loadedModelId]),
+    }, [isWeb, refreshSessions, modelCtx.loadedModelId, modelCtx.refreshLoadedModel]),
   );
 
   // Drawer back handler
