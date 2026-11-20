@@ -342,6 +342,7 @@ Stack header: "Models", with a "Help" icon button on the right that pushes Help.
 
 **Model list** (cards, one per model)
 - displayName (titleMedium).
+- The file name in small mono text under it when the name differs from the file name (a model renamed to "Chat" still says which file it is).
 - Chips in mono: quant, parameter label, size (for example `4.92 GB`), architecture.
 - Template line: "Template: Auto (from file)" or "Template: ChatML (manual)".
 - Memory hint chip:

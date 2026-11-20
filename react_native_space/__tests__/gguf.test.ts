@@ -1,4 +1,4 @@
-import { parseQuantFromFilename, isPrismOnlyQuant } from '../lib/gguf';
+import { parseQuantFromFilename, isPrismOnlyQuant, fileNameBelowName } from '../lib/gguf';
 import { base64ToBytes, checkCompatibility, readGgufHeader, GgufError, type ByteSource } from '../lib/ggufHeader';
 
 describe('parseQuantFromFilename', () => {
@@ -99,4 +99,14 @@ describe('readGgufHeader', () => {
 
 it('base64ToBytes', () => {
   expect(Array.from(base64ToBytes(Buffer.from([0, 255, 71]).toString('base64')))).toEqual([0, 255, 71]);
+});
+
+describe('fileNameBelowName', () => {
+  it('shows the file name under a name that differs from it', () => {
+    expect(fileNameBelowName({ displayName: 'Chat', fileName: 'Huihui-Qwen3.5-9B-abliterated.Q4_K_M.gguf' })).toBe('Huihui-Qwen3.5-9B-abliterated.Q4_K_M.gguf');
+  });
+  it('hides it when the name is just the file name', () => {
+    expect(fileNameBelowName({ displayName: 'Huihui-Qwen3.5-9B-abliterated.Q4_K_M', fileName: 'Huihui-Qwen3.5-9B-abliterated.Q4_K_M.gguf' })).toBeNull();
+    expect(fileNameBelowName({ displayName: 'model.gguf', fileName: 'model.gguf' })).toBeNull();
+  });
 });

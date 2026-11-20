@@ -6,7 +6,7 @@ import type { AppTheme } from '@/constants/theme';
 import { spacing, radii, fontFamilies, typeScale } from '@/constants/theme';
 import { useModelContext } from '@/contexts/ModelContext';
 import * as db from '@/lib/db';
-import { parseQuantFromFilename, formatBytes, memoryHint, isPrismOnlyQuant } from '@/lib/gguf';
+import { parseQuantFromFilename, formatBytes, memoryHint, isPrismOnlyQuant, fileNameBelowName } from '@/lib/gguf';
 import { base64ToBytes, checkCompatibility, GgufError, readGgufHeader, type CompatibilityReport } from '@/lib/ggufHeader';
 import { prepareModel } from '@/lib/modelMeta';
 import { finishModel } from '@/lib/modelImport';
@@ -424,6 +424,9 @@ export default function ModelsScreen() {
             <Card key={model.id} style={[styles.modelCard, { backgroundColor: c.surface, borderColor: c.hairline }]}>
               <Card.Content style={{ gap: 8 }}>
                 <Text style={{ color: c.text, fontFamily: typeScale.title.fontFamily, fontSize: 16 }}>{model.displayName}</Text>
+                {fileNameBelowName(model) && (
+                  <Text style={{ color: c.textSecondary, fontFamily: fontFamilies.mono, fontSize: 12, marginTop: -6 }} numberOfLines={2}>{fileNameBelowName(model)}</Text>
+                )}
                 <View style={styles.chipRow}>
                   {model.quantization && <Chip compact style={styles.metaChip} textStyle={[styles.metaChipText, { fontFamily: fontFamilies.mono, color: c.textSecondary }]}>{model.quantization}</Chip>}
                   {model.parameterLabel && <Chip compact style={styles.metaChip} textStyle={[styles.metaChipText, { fontFamily: fontFamilies.mono, color: c.textSecondary }]}>{model.parameterLabel}</Chip>}

@@ -27,3 +27,13 @@ export function memoryHint(fileSizeBytes: number, totalRam: number): 'fits' | 't
   if (ratio <= 0.6) return 'tight';
   return 'too_large';
 }
+
+/**
+ * The file name to show under a model's name on its card, so a model renamed
+ * to something like "Chat" still says which file it is. Null when the name is
+ * already the file name.
+ */
+export function fileNameBelowName(m: { displayName: string; fileName: string }): string | null {
+  const bare = (s: string) => s.trim().replace(/\.gguf$/i, '').toLowerCase();
+  return bare(m.displayName) === bare(m.fileName) ? null : m.fileName;
+}
