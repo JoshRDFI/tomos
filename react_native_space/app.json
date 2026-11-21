@@ -29,7 +29,8 @@
     "plugins": [
       "expo-router",
       "llama.rn",
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/withReleaseSigning"
     ],
     "scheme": "tomos"
   }

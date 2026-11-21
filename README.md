@@ -74,7 +74,23 @@ The generated project signs release builds with the **debug key**. That's fine f
 
 1. **Use your own application ID.** In `react_native_space/app.json`, change `expo.android.package` from `com.rdfindustries.tomos` to an ID you own, and run `npx expo prebuild --platform android --clean`.
 2. **Use your own name and icon.** Change `expo.name` in `app.json` (the app reads its name from there) and replace the icon files in `react_native_space/assets/` (`icon.png`, `android-icon-*.png`, `favicon.png`). The RDF Industries name and logo aren't covered by the code license; see [License](#license).
-3. **Sign with your own key.** Add a `signingConfigs.release` block that reads the keystore path and password from `~/.gradle/gradle.properties` or environment variables, or sign the APK with `apksigner`. Keep the key safe: Android only installs updates signed with the same key.
+3. **Sign with your own key.** Make one with `keytool` (it comes with the JDK):
+
+   ```bash
+   keytool -genkeypair -v -keystore ~/keys/my-release.jks -alias my-key \
+     -keyalg RSA -keysize 4096 -validity 10000 -storetype PKCS12
+   ```
+
+   Then add it to `~/.gradle/gradle.properties` (outside the repo):
+
+   ```properties
+   TOMOS_RELEASE_STORE_FILE=/home/you/keys/my-release.jks
+   TOMOS_RELEASE_STORE_PASSWORD=...
+   TOMOS_RELEASE_KEY_ALIAS=my-key
+   TOMOS_RELEASE_KEY_PASSWORD=...
+   ```
+
+   Run `npx expo prebuild --platform android` once so the signing setup (`react_native_space/plugins/withReleaseSigning.js`) is in `android/`; release builds then sign with your key. Without those settings they use the debug key. Back up the key and its password: Android only installs updates signed with the same key.
 
 Never commit keystores or passwords. `.gitignore` blocks `*.jks`, `*.keystore`, `keystore.properties` and similar files.
 
