@@ -42,7 +42,17 @@ Your chats leave the device only if you send them somewhere. Exporting a chat, a
 
 ## Get the app
 
-There are no published builds yet. To use it now, build it yourself (below).
+Download the APK from the [latest release](https://github.com/JoshRDFI/tomos/releases/latest) and open it on your phone. Android asks once to allow installs from your browser or file manager. There's no Play Store listing.
+
+Releases are signed by RDF Industries, Inc. To check a download, compare its signing certificate with this SHA-256 fingerprint (for example with `apksigner verify --print-certs Tomos-1.0.0.apk`):
+
+```
+a9:a2:82:7b:28:77:69:3f:c9:be:3c:11:35:35:fd:91:b9:e6:1d:46:7a:ea:29:27:6c:85:cd:39:c1:d4:92:40
+```
+
+Each new release installs over the last one and keeps your chats. To be told about updates, watch the repository's releases on GitHub, or add it to [Obtainium](https://github.com/ImranR98/Obtainium), which installs new releases for you.
+
+You can also build it yourself (below).
 
 ## Requirements
 
